@@ -31,7 +31,7 @@ test("a late ready callback after cancellation cannot re-enable the microphone",
   let stopped = 0, closed = 0, options: any;
   Object.assign(globalThis, { window: { isSecureContext: true } });
   Object.defineProperty(globalThis, "navigator", { configurable: true, value: {
-    mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() { stopped++; } }] }) },
+    mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() { stopped++; },getSettings:()=>({deviceId:'private-id',echoCancellation:false,sampleRate:48000}) }] }) },
   } });
   Object.assign(globalThis, {
     AudioContext: class {
@@ -49,7 +49,11 @@ test("a late ready callback after cancellation cannot re-enable the microphone",
     },
   });
   const capture = new AudioCapture();
-  await capture.start(() => {}, () => {}, () => {}, true);
+  let applied:any;
+  await capture.start(() => {}, () => {}, () => {}, true,{onSettings:s=>{applied=s;}});
+  assert.equal(applied.echoCancellation,false);
+  assert.equal(applied.noiseSuppression,undefined);
+  assert.equal(applied.deviceId,undefined);
   assert.equal(options.processorOptions.deferred, true);
   assert.deepEqual(messages, []);
   capture.stop();

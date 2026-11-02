@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AudioCapture } from "./audio";
+import { AudioCapture, type AudioInputOptions, type AudioQuality, type AppliedAudioSettings } from "./audio";
 import { connectLive } from "./liveConnection";
 import { isCurrentCaptureEvent } from "./captureEvents";
 import { applyEvent, initialTranscript, orderedSegments } from "./events";
@@ -7,7 +7,7 @@ import type { BridgeEvent, Session } from "./types";
 import type { CaptureHealth } from "./captureHealth";
 import type { ASRLanguageMode } from "./asrLanguages";
 
-export function useLive(session: Session, onSaved: () => void) {
+export function useLive(session: Session, onSaved: () => void, audioOptions: AudioInputOptions = {}) {
   const [transcript, setTranscript] = useState(() =>
     initialTranscript(session.id, session.segments),
   );
@@ -16,6 +16,10 @@ export function useLive(session: Session, onSaved: () => void) {
   const [preparing, setPreparing] = useState(false);
   const [settling, setSettling] = useState(false);
   const [level, setLevel] = useState(0);
+  const [inputPeak, setInputPeak] = useState(0);
+  const [audioQuality,setAudioQuality]=useState<AudioQuality>();
+  const [appliedAudio,setAppliedAudio]=useState<AppliedAudioSettings>();
+  const [asrAcousticProfile, setAsrAcousticProfile] = useState<"far" | "near">();
   const [queue, setQueue] = useState(0);
   const [elapsed, setElapsed] = useState(
     session.captured_ms ?? session.duration_ms ?? 0,
@@ -56,6 +60,8 @@ export function useLive(session: Session, onSaved: () => void) {
     activeRef.current = false;
     setActive(false);
     setLevel(0);
+    setInputPeak(0);
+    setAudioQuality(undefined);
     total.current += started.current ? Date.now() - started.current : 0;
     started.current = 0;
     setElapsed(total.current);
@@ -182,6 +188,7 @@ export function useLive(session: Session, onSaved: () => void) {
               setElapsed(total.current);
               started.current = Date.now();
               setAsrLanguageMode(e.asr_language_mode);
+              setAsrAcousticProfile(e.asr_acoustic_profile);
               setAsrEnhancement(e.asr_enhancement);
               clearTimeout(readyTimer.current);
               setPreparing(false);
@@ -309,6 +316,8 @@ export function useLive(session: Session, onSaved: () => void) {
     setNotice("");
     setHealth(undefined);
     setAsrLanguageMode(undefined);
+    setAudioQuality(undefined);setAppliedAudio(undefined);
+    setAsrAcousticProfile(undefined);
     setAsrEnhancement(undefined);
     activeRef.current = true;
     setActive(true);
@@ -336,9 +345,10 @@ export function useLive(session: Session, onSaved: () => void) {
             }
             socket.send(frame);
           },
-          setLevel,
+          (rms, quality) => { setLevel(rms); setInputPeak(quality?.input_peak ?? 0); setAudioQuality(quality); },
           stop,
           true,
+          {...audioOptions,onSettings:setAppliedAudio},
         );
       }
       if (requestGeneration !== generation.current || !activeRef.current)
@@ -389,6 +399,10 @@ export function useLive(session: Session, onSaved: () => void) {
     preparing,
     settling,
     level,
+    inputPeak,
+    audioQuality,
+    appliedAudio,
+    asrAcousticProfile,
     queue,
     elapsed,
     notice,

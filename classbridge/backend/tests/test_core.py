@@ -280,6 +280,7 @@ async def test_saved_audio_is_valid_pcm_wave(factory,monkeypatch):
         assert kwargs['vocabulary']=={'working memory':4}
         assert kwargs['context']=='인지심리학 수업. 작업기억.'
         assert kwargs['language_hints']==['ko','en']
+        assert kwargs['vad_model']=='near_meeting_16k'
         await kwargs['on_ready']()
         count=0
         async for frame in audio:count+=len(frame)
@@ -289,7 +290,7 @@ async def test_saved_audio_is_valid_pcm_wave(factory,monkeypatch):
         async def send_json(self,payload):pass
     with factory() as db:
         db.get(User,'alice').settings={'terms':[{'source':'working memory','target':'工作记忆'}],'asr_language_mode':'ko_en',
-            'asr_hotword_weight':4,'asr_context':'인지심리학 수업. 작업기억.'}
+            'asr_hotword_weight':4,'asr_context':'인지심리학 수업. 작업기억.', 'asr_acoustic_profile':'near'}
         db.get(User,'bob').settings={'terms':['private-other-owner'],'asr_language_mode':'ko','asr_context':'private-context'}
         row=seed(db,mode='real');row.retain_audio=True;db.commit()
     capture=live_module.LiveCapture(Socket(),'lesson','alice')
@@ -301,6 +302,7 @@ async def test_saved_audio_is_valid_pcm_wave(factory,monkeypatch):
         assert audio.status=='ready' and audio.duration_ms==100
         ready_event=next(e for e in db.query(Event).filter_by(type='session.state') if e.payload.get('ready'))
         assert ready_event.payload['asr_language_mode']=='ko_en'
+        assert ready_event.payload['asr_acoustic_profile']=='near'
         assert ready_event.payload['asr_enhancement']=={'hotword_count':1,'weight':4,'context_chars':len('인지심리학 수업. 작업기억.')}
         assert '인지심리학' not in str(ready_event.payload)  # Events expose counts, not private context.
         with wave.open(io.BytesIO(get_storage().read(audio.storage_key)),'rb') as wav:
@@ -468,6 +470,9 @@ def test_asr_language_settings_validate_and_partial_updates_preserve_other_prefe
     assert result.json()['theme']=='dark' and result.json()['terms']==['인지 부하']
     assert client.patch('/api/settings',json={'theme':'light'}).json()['asr_language_mode']=='ko_en'
     assert client.patch('/api/settings',json={'asr_language_mode':'made-up-language'}).status_code==422
+    assert client.patch('/api/settings',json={'asr_acoustic_profile':'unknown'}).status_code==422
+    assert client.patch('/api/settings',json={'audio_processing_mode':'enhance'}).status_code==422
+    assert client.patch('/api/settings',json={'asr_acoustic_profile':'near','audio_processing_mode':'natural'}).json()['asr_acoustic_profile']=='near'
     with factory() as db:assert db.get(User,'bob').settings['asr_language_mode']=='ko'
     assert client.patch('/api/settings',json={'asr_language_mode':'auto'}).json()['asr_language_mode']=='auto'
 

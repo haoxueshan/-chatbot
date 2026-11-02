@@ -20,6 +20,8 @@ class Preferences(BaseModel):
     asr_hotword_weight: Literal[2,3,4] = 2
     asr_context: str = Field(default='',max_length=400)
     asr_assist_enabled: bool = False
+    asr_acoustic_profile: Literal['far','near'] = 'far'
+    audio_processing_mode: Literal['standard','natural'] = 'standard'
     terms: list[dict | str] = Field(default_factory=list, max_length=200)
     retain_audio: bool = False
 

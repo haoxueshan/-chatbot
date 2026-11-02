@@ -112,7 +112,8 @@ async def test_embedding_batches_respects_v4_limit(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('mode,expected_hints',[('auto',None),('ko_en',['ko','en']),('ko',['ko'])])
-async def test_streaming_asr_waits_started_sends_pcm_and_finishes(monkeypatch,mode,expected_hints):
+@pytest.mark.parametrize('vad_model',['far_field_meeting_16k','near_meeting_16k'])
+async def test_streaming_asr_waits_started_sends_pcm_and_finishes(monkeypatch,mode,expected_hints,vad_model):
     from app.services.asr_options import asr_language_hints
     task = "a"*32
     monkeypatch.setattr(module.uuid, "uuid4", lambda: SimpleNamespace(hex=task))
@@ -158,12 +159,13 @@ async def test_streaming_asr_waits_started_sends_pcm_and_finishes(monkeypatch,mo
     metrics={}
     context=('작업기억 '+ '인지부하 '*90) if mode=='ko_en' else None
     result = [event async for event in AliyunProvider(config()).stream_asr(audio(),on_ready=on_ready,metrics=metrics,
-        vocabulary={'RAG':2},context=context,language_hints=asr_language_hints(mode))]
+        vocabulary={'RAG':2},context=context,language_hints=asr_language_hints(mode),vad_model=vad_model)]
     assert result[0]["final"] is False and result[1]["final"] is True
     assert result[1]["end_ms"] == 400
     start = json.loads(sent[0])
     assert start["payload"]["parameters"]["format"] == "pcm"
     assert start["payload"]["parameters"]["sample_rate"] == 16000
+    assert start["payload"]["parameters"]["vad_model"] == vad_model
     if expected_hints is None:assert 'language_hints' not in start['payload']['parameters']
     else:assert start['payload']['parameters']['language_hints']==expected_hints
     assert result[1]['text']=='hello world'  # ASR output is never rewritten into the translation language.

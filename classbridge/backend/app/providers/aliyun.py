@@ -195,10 +195,14 @@ class AliyunProvider:
         data = await self.request("/services/rerank/text-rerank/text-rerank", {"model": self.value("rerank_model", "qwen3-rerank"), "input": {"query": question, "documents": documents}, "parameters": {"top_n": min(top_n, len(documents)), "return_documents": False}}, native=True)
         return [(r["index"], r["relevance_score"]) for r in data["output"]["results"] if 0 <= r["index"] < len(documents)]
 
-    async def stream_asr(self, audio: AsyncIterator[bytes], *, vocabulary=None, context=None, language_hints=None, on_ready=None, metrics=None) -> AsyncIterator[dict]:
+    async def stream_asr(self, audio: AsyncIterator[bytes], *, vocabulary=None, context=None, language_hints=None, vad_model=None, on_ready=None, metrics=None) -> AsyncIterator[dict]:
         """Caller closes audio iterator on stop; final results drain until task-finished."""
         task_id = uuid.uuid4().hex
         params = {"format": "pcm", "sample_rate": 16000, "heartbeat": True}
+        if vad_model is not None:
+            if vad_model not in ("near_meeting_16k", "far_field_meeting_16k"):
+                raise ProviderError("invalid_asr_parameter", "不支持的拾音场景参数。")
+            params["vad_model"] = vad_model
         if language_hints:
             params['language_hints'] = list(language_hints)
         if vocabulary:

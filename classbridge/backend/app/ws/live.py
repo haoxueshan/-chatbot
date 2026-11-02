@@ -44,6 +44,7 @@ class LiveCapture:
         self.ready=False;self.request_id=None;self.captured_before=0
         self.asr_metrics={};self.failure_reported=False
         self.asr_language_mode='auto'
+        self.asr_acoustic_profile='far'
         self.asr_enhancement={}
         self.received_audio_ms=0;self.last_audio_at=None;self.level_window=deque(maxlen=50)
 
@@ -107,7 +108,7 @@ class LiveCapture:
             stream.status='active';stream.offset_ms=self.offset;stream.created_at=datetime.now(timezone.utc)
             row.status='recording';row.duration_ms=self.offset
             emit(db,row,'session.state',state='recording',status='recording',ready=True,request_id=self.request_id,
-                 offset_ms=self.offset,captured_ms=self.captured_before,asr_language_mode=self.asr_language_mode,asr_enhancement=self.asr_enhancement,
+                 offset_ms=self.offset,captured_ms=self.captured_before,asr_language_mode=self.asr_language_mode,asr_acoustic_profile=self.asr_acoustic_profile,asr_enhancement=self.asr_enhancement,
                  message='模拟演示，不调用付费 API' if self.mode=='demo' else '识别服务已就绪，可以开始说话')
             if row.retain_audio and self.mode=='real':
                 temp=Path(settings.data_dir)/'audio-temp';temp.mkdir(parents=True,exist_ok=True)
@@ -296,8 +297,11 @@ class LiveCapture:
                     context=str(preferences.get('asr_context','')).strip()[:400]
                     self.asr_enhancement={'hotword_count':len(vocabulary),'weight':weight,'context_chars':len(context)}
                     self.asr_language_mode=preferences.get('asr_language_mode','auto')
+                    profile=preferences.get('asr_acoustic_profile','far')
+                    self.asr_acoustic_profile=profile if profile in ('far','near') else 'far'
                 async for event in AliyunProvider().stream_asr(self.audio_iter(),on_ready=self.mark_ready,metrics=self.asr_metrics,
-                    vocabulary=vocabulary,context=context,language_hints=asr_language_hints(self.asr_language_mode)):await self.consume(event)
+                    vocabulary=vocabulary,context=context,language_hints=asr_language_hints(self.asr_language_mode),
+                    vad_model='near_meeting_16k' if self.asr_acoustic_profile=='near' else 'far_field_meeting_16k'):await self.consume(event)
         except asyncio.CancelledError:raise
         except Exception as exc:
             from app.providers.aliyun import ProviderError

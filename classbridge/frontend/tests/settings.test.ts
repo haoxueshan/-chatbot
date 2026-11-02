@@ -15,6 +15,9 @@ test("settings displays the saved Korean/English input hint separately from Chin
   assert.match(html, /value="ko_en" selected=""/);
   assert.ok(html.includes("全部语言自动识别"));
   assert.ok(html.includes("语音识别语言提示"));
+  assert.ok(html.includes("应用韩英远场课堂预设"));
+  assert.ok(html.includes("识别拾音场景"));
+  assert.ok(html.includes("浏览器音频处理"));
   assert.ok(html.includes("简体中文"));
   assert.ok(html.includes("인지심리학. 작업기억."));
   assert.match(html, /value="4" selected=""/);

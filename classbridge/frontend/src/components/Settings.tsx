@@ -11,6 +11,7 @@ import {
   Sun,
 } from "lucide-react";
 import type { Preferences } from "../lib/types";
+import { classroomPreset } from "../lib/classroomPreset";
 import { asrLanguageLabels, type ASRLanguageMode } from "../lib/asrLanguages";
 export function Settings({
   preferences,
@@ -163,6 +164,7 @@ export function Settings({
               <p>为语音识别提供课堂语言提示，中文翻译单独生成。</p>
             </div>
           </div>
+          <button type="button" className="secondary" onClick={() => setDraft(classroomPreset(draft))}>应用韩英远场课堂预设（仍需点击保存）</button>
           <label className="settings-row">
             <div>
               <strong>语音识别语言提示</strong>
@@ -248,6 +250,28 @@ export function Settings({
               <p>你决定什么值得留下。</p>
             </div>
           </div>
+          <label className="settings-row">
+            <div>
+              <strong>识别拾音场景</strong>
+              <small>远距离教授讲话用远场（ASR 默认）；领夹麦或近距离话筒可测试近场。仅在下次开始录音时生效。</small>
+            </div>
+            <select aria-label="识别拾音场景" value={draft.asr_acoustic_profile || "far"}
+              onChange={(e) => setDraft({ ...draft, asr_acoustic_profile: e.target.value as "far" | "near" })}>
+              <option value="far">远场课堂 / 会议</option>
+              <option value="near">近距离麦克风</option>
+            </select>
+          </label>
+          <label className="settings-row">
+            <div>
+              <strong>浏览器音频处理</strong>
+              <small>标准模式保持原有回声消除、降噪和自动增益；原声模式关闭浏览器的这些处理供 A/B 对比，可能更差，不能消除硬件处理。</small>
+            </div>
+            <select aria-label="浏览器音频处理" value={draft.audio_processing_mode || "standard"}
+              onChange={(e) => setDraft({ ...draft, audio_processing_mode: e.target.value as "standard" | "natural" })}>
+              <option value="standard">标准（默认）</option>
+              <option value="natural">原声对照</option>
+            </select>
+          </label>
           <label className="settings-row">
             <div>
               <strong>新会话默认保留音频</strong>

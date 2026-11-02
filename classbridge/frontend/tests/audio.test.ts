@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PCMResampler } from "../public/audio/pcm.js";
-import { AudioCapture } from "../src/lib/audio.ts";
+import { AudioCapture, captureConstraints } from "../src/lib/audio.ts";
 
 function signal(rate: number, hz: number, seconds = 1) {
   return Float32Array.from(
@@ -11,6 +11,16 @@ function signal(rate: number, hz: number, seconds = 1) {
 }
 const rms = (a: ArrayLike<number>) =>
   Math.sqrt(Array.from(a).reduce((n, x) => n + x * x, 0) / a.length);
+test("microphone profile keeps defaults and uses exact device plus optional natural A/B", () => {
+  assert.deepEqual(captureConstraints(), { audio: {
+    channelCount: { ideal: 1 }, echoCancellation: true,
+    noiseSuppression: true, autoGainControl: true,
+  }});
+  assert.deepEqual(captureConstraints({ deviceId: "usb-mic", processingMode: "natural" }), { audio: {
+    channelCount: { ideal: 1 }, echoCancellation: false,
+    noiseSuppression: false, autoGainControl: false, deviceId: { exact: "usb-mic" },
+  }});
+});
 test("48k/44.1k ->16k resampling conserves time, anti-aliases and averages channels", () => {
   for (const rate of [48000, 44100]) {
     const mono = signal(rate, 1000);

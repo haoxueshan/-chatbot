@@ -198,7 +198,44 @@ export function SessionView({
   openSession: (id: string) => void;
   deleted: () => void;
 }) {
-  const live = useLive(session, refresh);
+  const [microphoneId, setMicrophoneId] = useState(() => {
+    try { return typeof window === "undefined" ? "" : window.localStorage.getItem("classbridge.microphone.v1") || ""; }
+    catch { return ""; }
+  });
+  const [microphones, setMicrophones] = useState<{ deviceId: string; label: string }[]>([]);
+  const [deviceError,setDeviceError]=useState("");
+  const deviceGeneration=useRef(0);
+  const devicesMounted=useRef(true);
+  const live = useLive(session, refresh, {
+    deviceId: microphoneId,
+    processingMode: preferences.audio_processing_mode || "standard",
+  });
+  const refreshMicrophones = () => {
+    const generation=++deviceGeneration.current;
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) {
+      setDeviceError("浏览器暂不支持设备列表；请使用安全连接，可选择系统默认麦克风。");return;
+    }
+    void navigator.mediaDevices.enumerateDevices().then((items) => {
+      if(!devicesMounted.current || generation!==deviceGeneration.current)return;
+      setMicrophones(items.filter((item) => item.kind === "audioinput" && item.deviceId)
+        .map((item) => ({ deviceId: item.deviceId, label: item.label })));
+      setDeviceError("");
+    }).catch(() => {if(devicesMounted.current && generation===deviceGeneration.current)setDeviceError("无法读取麦克风列表，请检查浏览器权限并重试；没有自动切换设备。");});
+  };
+  useEffect(() => {
+    if (session.mode !== "real" || typeof navigator === "undefined") return;
+    devicesMounted.current=true;
+    refreshMicrophones();
+    navigator.mediaDevices?.addEventListener?.("devicechange", refreshMicrophones);
+    return () => {devicesMounted.current=false;deviceGeneration.current++;navigator.mediaDevices?.removeEventListener?.("devicechange", refreshMicrophones);};
+  }, [session.mode]);
+  useEffect(()=>{if(session.mode==="real" && live.active)refreshMicrophones();},[live.preparing,live.active]);
+  const chooseMicrophone = (id: string) => {
+    if(live.active || live.settling)return;
+    setMicrophoneId(id);
+    try { window.localStorage.setItem("classbridge.microphone.v1", id); }
+    catch { /* private mode/storage restrictions */ }
+  };
   const timeline = useMemo(() => buildTimeline(live.segments, live.gaps), [live.segments, live.gaps]);
   const [tab, setTab] = useState<"subtitles" | "summary" | "chat">("subtitles"),
     [sideTab, setSideTab] = useState<"summary" | "chat">("summary"),
@@ -738,6 +775,31 @@ export function SessionView({
           </div>
         </aside>
       </div>
+      {session.mode === "real" && (
+        <div className="info-box" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          <label htmlFor="classbridge-microphone">麦克风：</label>
+          <select id="classbridge-microphone" aria-label="录音麦克风"
+            disabled={live.active || live.settling}
+            value={microphoneId}
+            onChange={(event) => chooseMicrophone(event.target.value)}>
+            <option value="">系统默认麦克风</option>
+            {microphoneId && !microphones.some((m) => m.deviceId === microphoneId) &&
+              <option value={microphoneId}>此前选择的设备（可能已断开）</option>}
+            {microphones.filter((m) => m.deviceId !== "default").map((m, index) =>
+              <option key={m.deviceId} value={m.deviceId}>{m.label || `麦克风 ${index + 1}`}</option>)}
+          </select>
+          <button className="text-button" type="button" onClick={refreshMicrophones}
+            disabled={live.active || live.settling}>刷新设备</button>
+          <span className="tiny muted">
+            本次识别：{live.asrAcousticProfile === "near" ? "近场" : live.asrAcousticProfile === "far" ? "远场" : "尚未收到服务端确认"} ·
+            下次请求：{preferences.audio_processing_mode === "natural" ? "浏览器原声模式" : "浏览器标准处理"}
+          </span>
+          {deviceError && <span role="status">{deviceError}</span>}
+          {live.appliedAudio && <span className="tiny muted">浏览器实际报告：{([['echoCancellation','回声消除'],['noiseSuppression','降噪'],['autoGainControl','自动增益']] as const).map(([key,label])=>`${label}${live.appliedAudio?.[key]===undefined?'未报告':live.appliedAudio[key]?'开':'关'}`).join(' · ')}（硬件处理未知）</span>}
+          {live.active && live.audioQuality && <span className="tiny muted">峰值 {live.inputPeak.toFixed(2)} / {Math.round(live.audioQuality.peak_window_ms)}ms窗口 · 电平不是识别置信度</span>}
+          {live.active && live.audioQuality?.possible_clipping && <strong role="status">输入连续接近满幅，可能削波；请检查设备增益</strong>}
+        </div>
+      )}
       <div className="capture-bar">
         <div className="capture-left">
           <span

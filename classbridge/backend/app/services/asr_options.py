@@ -14,7 +14,7 @@ def asr_vocabulary_report(terms, weight=2):
     result = {};skipped=[]
     weight=weight if type(weight) is int and 2<=weight<=4 else 2
     for index,item in enumerate(terms if isinstance(terms,list) else []):
-        word = item.get('source',item.get('term','')) if isinstance(item,dict) else item
+        word = (item.get('source') or item.get('term') or '') if isinstance(item,dict) else item
         word=unicodedata.normalize('NFC',' '.join(word.split())) if isinstance(word,str) else ''
         reason=None
         if not word:reason='缺少原词'

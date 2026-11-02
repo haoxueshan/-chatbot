@@ -1,4 +1,5 @@
 import { PCMResampler } from "./pcm.js";
+import { InputQuality } from "./quality.js";
 class ClassBridgeCapture extends AudioWorkletProcessor {
   constructor(options) {
     super();
@@ -6,6 +7,7 @@ class ClassBridgeCapture extends AudioWorkletProcessor {
     this.resampler = new PCMResampler(sampleRate);
     this.pending = [];
     this.meterTicks = 0;
+    this.quality = new InputQuality(sampleRate);
     this.port.onmessage = ({ data }) => {
       if (data.type === "begin" && !this.enabled) {
         this.resampler = new PCMResampler(sampleRate);
@@ -27,19 +29,8 @@ class ClassBridgeCapture extends AudioWorkletProcessor {
       this.pending.splice(0, 320);
       this.port.postMessage({ type: "frame", frame }, [frame]);
     }
-    if (++this.meterTicks >= 8) {
-      let sum = 0;
-      for (let i = 0; i < channels[0].length; i++) {
-        let x = 0;
-        for (const c of channels) x += c[i] || 0;
-        sum += (x / channels.length) ** 2;
-      }
-      this.port.postMessage({
-        type: "level",
-        rms: Math.sqrt(sum / channels[0].length),
-      });
-      this.meterTicks = 0;
-    }
+    const quality=this.quality.push(channels);
+    if(quality)this.port.postMessage({type:"level",...quality});
     return true;
   }
 }

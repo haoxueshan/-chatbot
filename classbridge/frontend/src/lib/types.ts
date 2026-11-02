@@ -89,6 +89,7 @@ export interface BridgeEvent extends Partial<Segment> {
   request_id?: string;
   snapshot_seq?: number;
   asr_language_mode?: import("./asrLanguages").ASRLanguageMode;
+  asr_acoustic_profile?: "far" | "near";
   asr_enhancement?: { hotword_count: number; weight: number; context_chars: number };
   diagnostics?: import("./captureHealth").CaptureHealth;
   data?: Record<string, unknown>;
@@ -134,6 +135,8 @@ export interface ChatReply {
 export interface Preferences {
   asr_assist_enabled?: boolean;
   asr_hotword_weight?: 2 | 3 | 4;
+  asr_acoustic_profile?: "far" | "near";
+  audio_processing_mode?: "standard" | "natural";
   asr_context?: string;
   asr_terms_status?: { enabled_count: number; skipped: { index: number; reason: string }[] };
   asr_language_mode?: import("./asrLanguages").ASRLanguageMode;
