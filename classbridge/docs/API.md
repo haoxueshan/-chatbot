@@ -61,6 +61,7 @@ Session返回captured_ms（已结束识别流的累计采音时长），与durat
 | --- | --- |
 | transcript.partial | 当前句临时原文，可替换，不入索引 |
 | transcript.final | 稳定原文，新版本持久化；同时事务创建后续任务 |
+| transcript.interrupted | 最后收到但未定稿的 ASR 原文，持久恢复事件；不是正式证据，不触发翻译、索引或摘要任务 |
 | translation.partial | 临时译文；source_status=final时是稳定原文的流式译文 |
 | translation.final | 绑定原文版本的最终译文 |
 | segment.updated | 版本更新或retired墓碑，不能简单字符串追加 |
@@ -93,3 +94,24 @@ GET/PATCH /api/settings支持asr_language_mode：auto（默认，省略云端lan
 常见错误使用 `detail:{code,message}`（参数验证保留FastAPI标准422）：origin_forbidden、mode_mismatch、missing_api_key、missing_workspace、authentication_failed、model_permission、region_mismatch、model_unavailable、quota_exhausted、rate_limited、timeout、format_error、invalid_citation、source_deleted。未知资源/他人资源返回404，未登录401。日志不记录密钥、整段音频或模型完整输入。
 
 `/api/storage/signed` 是仅供云端读取特定文件的短期签名能力路由，默认不公开目录；验证签名、过期与数据库资源存活状态。反向代理必须关闭此路径的访问日志。它不替代普通用户文件接口的登录鉴权。
+
+
+## 2026-11-03 原文与翻译通道隔离
+
+`GET /api/sessions/{session_id}` 继续返回正式 `segments`，另返回 `unconfirmed_segments`（无记录为空数组）。后者从该会话的持久 `transcript.interrupted` 事件恢复，按 `stream_id + sentence_id` 去重，排除已有正式/退休版本的身份；沿用归属鉴权。清空会话删除这些事件，清空响应新增 `event_seq`，原 `ok` 字段保留。
+
+原文状态 `source_status` 为 `partial/final/interrupted/retired`；翻译状态 `translation_status` 为 `pending/partial/final/failed`。正式快照保留旧 `status`、版本和文本字段，并补充两个独立状态；失败译文有 `translation_error`。没有中文时原文仍可显示。
+
+`transcript.interrupted` 示例（模式来自真实会话，不作为模拟降级）：
+
+```json
+{"type":"transcript.interrupted","event_id":"uuid","event_seq":25,"session_id":"lesson","stream_id":"stream","sentence_id":"stream:1","source_revision":3,"translation_revision":0,"text":"오늘은 인공지능에 대해서","start_ms":12000,"end_ms":15000,"source_status":"interrupted","source_final":false,"status":"interrupted","mode":"real","message":"识别结束前未收到正式定稿；原文待确认，不能作为正式证据"}
+```
+
+正常停止先排空 ASR 并等待官方 final，再将剩余 partial 写入恢复事件，最后与 stopped 状态在同一事务提交。意外网络结束也走该结算。未确认记录不写入 `SegmentRevision`、`Translation` 或正式知识索引；默认导出、摘要和 RAG 仍只读取正式来源。数据库故障报告 `source_storage_failed`，不伪造保存成功。硬终止进程可能来不及结算内存中的 partial，不能保证恢复。
+
+翻译任务 `processing.failed` 在来源仍存在时附 `stream_id/sentence_id/source_revision/task_kind=translate`，只更新对应中文状态。无法可靠定位时只显示一般错误。翻译事件的 `text/source_status` 不再有权建立原文或将原文升级为 final。
+
+前端使用独立 `sources/translations`，`orderedSegments()` 是以原文为主的派生视图。无原文的乱序译文最多暂存 200 条，不生成空字幕。正式中文精确匹配来源版本；完整、兼容的前缀预览可跨 partial 修订继续显示，但始终为临时中文。快照携带内部 `snapshot_seq`（响应水位），禁止清空前的快照复活旧字幕。停止、断线后的本地 partial 仅标记待确认，持久恢复以服务端事件和快照为准。
+
+完整实现与回归证据见 [双流水线验收报告](ASR_DUAL_PIPELINE.md)。

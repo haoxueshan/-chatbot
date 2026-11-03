@@ -26,3 +26,22 @@ test("rendered session places the new bilingual caption after historical gaps an
   assert.ok(html.includes("00:30"));
   assert.ok(html.includes("下次识别提示：韩语＋英语"));
 });
+
+
+test("interrupted source remains visible even with originals hidden and failed Chinese does not hide final source", () => {
+  const html=renderToString(React.createElement(SessionView,{
+    session:{id:"lesson",title:"回归",mode:"real",status:"stopped",kind:"classroom",duration_ms:1000,
+      created_at:"2026-11-03T00:00:00Z",retain_audio:false,
+      segments:[{sentence_id:"1",stream_id:"stream",source_revision:1,translation_revision:0,
+        text:"공식 원문",translation:"",translation_status:"failed",translation_error:"timeout",
+        start_ms:0,end_ms:500,status:"translating",mode:"real"}],
+      unconfirmed_segments:[{sentence_id:"2",stream_id:"stream",source_revision:1,translation_revision:0,
+        text:"미완성 원문",translation:"",source_status:"interrupted",source_final:false,
+        start_ms:600,end_ms:1000,status:"interrupted",mode:"real"}]},
+    preferences:{show_original:false,subtitle_size:24} as any,
+    onActivity(){},refresh(){},back(){},notify(){},openSession(){},deleted(){}
+  }));
+  assert.ok(html.includes("识别未完成 · 待确认"));assert.ok(html.includes("미완성 원문"));
+  assert.ok(html.includes("对应原文尚未正式确认"));assert.ok(html.includes("翻译失败，原文已保留"));
+  assert.ok(html.includes("原文已定稿"));assert.ok(!html.includes("正在理解这一句"));
+});

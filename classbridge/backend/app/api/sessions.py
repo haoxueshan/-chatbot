@@ -11,7 +11,7 @@ from app.api.auth import current_user
 from app.config import settings
 from app.db import get_db
 from app.models import User, Session, SegmentRevision, Translation, Event, Stage, AudioAsset, RecognitionStream, Chunk, Chat, Citation, ProcessingTask, Outbox, Fact, ActionItem, Document
-from app.services.events import latest_segments, serialize_segment, enqueue, emit
+from app.services.events import latest_segments, serialize_segment, enqueue, emit, unconfirmed_segments
 from app.services.timing import captured_duration_ms
 from app.services.retired_tasks import RETIRED_TASK_KIND
 from app.schemas.stages import stage_text
@@ -45,6 +45,7 @@ def session_dict(db, row, detail=False):
         current_segments=latest_segments(db,row.id)
         current_versions={s.sentence_id:s.source_revision for s in current_segments}
         result['segments'] = [serialize_segment(db,s) for s in current_segments]
+        result['unconfirmed_segments'] = unconfirmed_segments(db,row.id)
         result['stages'] = [stage_dict(s,current_versions) for s in db.query(Stage).filter_by(session_id=row.id).order_by(Stage.created_at).all()]
         result['gaps'] = [e.payload for e in db.query(Event).filter_by(session_id=row.id,type='capture.gap').order_by(Event.event_seq).all()]
         result['tasks'] = [{'id':t.id,'kind':t.kind,'status':t.status,'error':t.error} for t in db.query(ProcessingTask).filter_by(session_id=row.id).filter(ProcessingTask.kind!=RETIRED_TASK_KIND).order_by(ProcessingTask.created_at.desc()).limit(30)]
@@ -106,7 +107,7 @@ def clear_segments(session_id:str,user:User=Depends(current_user),db:DBSession=D
     row.duration_ms=0
     row.status='idle';row.active_stream_id=None
     emit(db,row,'session.state',state='idle',status='idle',cleared=True)
-    db.commit();return {'ok':True}
+    db.commit();return {'ok':True,'event_seq':row.event_seq}
 
 
 @router.delete('/{session_id}')

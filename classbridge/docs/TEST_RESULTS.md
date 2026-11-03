@@ -1,5 +1,7 @@
 # 实际测试与验收记录
 
+2026-11-03 原文/翻译双流水线隔离：后端完整回归在 `INCREMENTAL_TRANSLATION_ENABLED=false`、`true` 下各 **167 passed，0 failed**（21.46/20.53 秒）；三个受影响模块联合定向 **29 passed**。前端 **64 passed，0 failed**，TypeScript/Vite 生产构建通过（2120 模块，3.45 秒）。新增后端 19 个参数展开用例、前端 13 个 reducer 用例及 1 个实际组件渲染用例。验证慢 MT 不阻塞 ASR、正式保存失败不误标成功、中断原文独立持久化与 API/WS 恢复、RAG/摘要/导出排除未确认内容、原译文独立状态、旧版本及清空水位。测试使用临时 SQLite 与 Mock ASR/MT，新增付费调用 0；未重启用户服务或改真实配置，没有真实课堂/实体 Safari 结论。逐文件说明及限制见 [双流水线验收报告](ASR_DUAL_PIPELINE.md)。
+
 2026-11-02语音识别逻辑检查：后端完整 **85 passed（16.85秒）**，前端 **29 passed（0.88秒）**，TypeScript/Vite构建通过（4.05秒）。新增定稿后迟到partial、空/重复回调、重复定稿与outbox去重、合法定稿修订、错误task-started拒绝、采音控制request_id绑定及旧请求状态/错误隔离测试。修复前已复现后端2项、前端1项失败；最后补充的跨修订重复定稿由test_live_ordering.py复验，**3 passed（1.40秒）**。现有前端127.0.0.1:80与API健康检查8000均HTTP200；未重启用户后端，不代表运行进程已经加载修复。没有新增真实模型调用，没有实体Safari或真实音频准确率结论。见 [语音识别逻辑检查](ASR_LOGIC_REVIEW.md)。
 
 

@@ -4,7 +4,44 @@ export interface User {
   id: string;
   username: string;
 }
+export type SourceStatus = "partial" | "final" | "interrupted" | "retired";
+export type TranslationStatus = "pending" | "partial" | "final" | "failed";
+export interface SourceState {
+  sentence_id: string;
+  stream_id: string;
+  text: string;
+  revision: number;
+  status: SourceStatus;
+  start_ms: number;
+  end_ms: number;
+  mode: Mode;
+  source_event_seq?: number;
+  stable_preview?: string;
+  unstable_tail?: string;
+  hypothesis_revision?: number;
+  previous_partial?: { text: string; revision: number }; // one bounded diagnostic, never evidence
+  speaker?: string | null;
+  provenance?: string;
+  latency?: Segment["latency"];
+}
+export interface TranslationState {
+  sentence_id: string;
+  stream_id: string;
+  text: string;
+  source_revision: number;
+  revision: number;
+  status: TranslationStatus;
+  translation_event_seq?: number;
+  preview_source_text?: string;
+  preview_request_id?: number;
+  preview_complete?: boolean;
+  error?: string;
+  latency?: Segment["latency"];
+}
 export interface Segment {
+  source_status?: SourceStatus;
+  translation_status?: TranslationStatus;
+  translation_error?: string;
   provenance?: string;
   sentence_id: string;
   stream_id: string;
@@ -56,6 +93,7 @@ export interface Session {
   duration_ms: number;
   captured_ms?: number;
   segments?: Segment[];
+  unconfirmed_segments?: Segment[];
   stages?: Stage[];
   audio_status?: string;
   audio_assets?: unknown[];
@@ -74,7 +112,7 @@ export interface BridgeEvent extends Partial<Segment> {
   code?: string;
   queue_size?: number;
   latency?: Record<string, number | string | boolean | null>;
-  source_status?: string;
+  snapshot_seq?: number;
   cleared?: boolean;
   recovered?: boolean;
   task_kind?: string;

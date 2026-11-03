@@ -9,7 +9,7 @@ import type { ASRLanguageMode } from "./asrLanguages";
 
 export function useLive(session: Session, onSaved: () => void, audioOptions: AudioInputOptions = {}) {
   const [transcript, setTranscript] = useState(() =>
-    initialTranscript(session.id, session.segments),
+    initialTranscript(session.id, session.segments, session.unconfirmed_segments),
   );
   const [connection, setConnection] = useState("连接中");
   const [active, setActive] = useState(false);
@@ -86,22 +86,23 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
       total.current = session.captured_ms ?? session.duration_ms;
       setElapsed(total.current);
     }
-    for (const segment of session.segments || []) {
+    for (const segment of [...(session.unconfirmed_segments || []), ...(session.segments || [])]) {
       if (segment.latency && Object.keys(segment.latency).length)
         setLatency(segment.latency);
       setTranscript((old) => {
         const event = {
           ...segment,
           session_id: session.id,
-          event_id: `snapshot:${segment.sentence_id}:${segment.source_revision}:${segment.translation_revision}:${session.event_seq || 0}`,
+          event_id: `snapshot:${segment.stream_id}:${segment.source_status}:${segment.sentence_id}:${segment.source_revision}:${segment.translation_revision}:${session.event_seq || 0}`,
           event_seq: 0,
-          type: "segment.updated",
+          snapshot_seq: session.event_seq || 0,
+          type: segment.source_status === "interrupted" ? "transcript.interrupted" : "segment.updated",
           translation: segment.translation || undefined,
         };
         return applyEvent(old, event);
       });
     }
-  }, [session.captured_ms, session.duration_ms, session.segments]);
+  }, [session.captured_ms, session.duration_ms, session.segments, session.unconfirmed_segments, session.event_seq]);
   useEffect(() => {
     let connectionNotice = "";
     const transport = connectLive({
@@ -240,6 +241,8 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
         }
       },
       onLost: () => {
+        setTranscript(s => applyEvent(s, {type:"session.state", session_id:session.id,
+          stream_id:activeStream.current || s.activeStream, state:"failed", event_seq:0, event_id:`local-loss:${Date.now()}`}));
         setSettling(false);
         setQueue(0);
         if (activeRef.current) {
@@ -414,8 +417,9 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     start,
     stop,
     retry: () => setReconnect((x) => x + 1),
-    clear: () => {
-      setTranscript(initialTranscript(session.id));
+    clear: (clearedSeq = sequence.current) => {
+      sequence.current = Math.max(sequence.current,clearedSeq);
+      setTranscript(s => applyEvent(s,{type:"session.state",event_id:`local-clear:${clearedSeq}`,event_seq:clearedSeq,session_id:session.id,cleared:true}));
       setGaps([]);
       setLatency({});
       total.current = 0;

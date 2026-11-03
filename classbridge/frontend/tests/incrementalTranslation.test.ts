@@ -20,7 +20,7 @@ function preview(fields: Partial<BridgeEvent> = {}) {
 
 test("stable prefix is reversible and never a formal source; old schema still works", () => {
   let s = applyEvent(initialTranscript("lesson"), partial());
-  assert.equal(orderedSegments(s)[0].source_final, undefined);
+  assert.equal(orderedSegments(s)[0].source_final, false);
   s = applyEvent(s, partial({ source_revision: 2, text: "오늘은 AI 배워요.",
     stable_preview: "오늘은 ", unstable_tail: "AI 배워요." }));
   assert.equal(orderedSegments(s)[0].stable_preview, "오늘은 ");
@@ -35,7 +35,7 @@ test("only completed compatible prefix translations survive a growing tail", () 
   let s = applyEvent(applyEvent(initialTranscript("lesson"), partial()), preview());
   s = applyEvent(s, partial({ source_revision: 2, text: source + " 다음은", unstable_tail: "공부합니다. 다음은" }));
   assert.equal(orderedSegments(s)[0].translation, "今天学习 RAG。");
-  assert.equal(orderedSegments(s)[0].translation_final, undefined);
+  assert.equal(orderedSegments(s)[0].translation_final, false);
   s = applyEvent(s, partial({ source_revision: 3, text: "어제는 AI 공부", stable_preview: "", unstable_tail: "어제는 AI 공부" }));
   assert.equal(orderedSegments(s)[0].translation, "");
   s = applyEvent(s, preview({ source_revision: 2, translation: "过时版本" }));
@@ -60,7 +60,8 @@ test("reconnect retires old previews but still accepts durable historic final tr
   s = applyEvent(s, partial());
   s = applyEvent(s, e("session.state", { stream_id: "new", state: "recording", event_seq: 10 }));
   s = applyEvent(s, partial());
-  assert.equal(orderedSegments(s).length, 0);
+  assert.equal(orderedSegments(s).length, 1);
+  assert.equal(orderedSegments(s)[0].source_status, "interrupted");
   s = applyEvent(s, e("transcript.final", { text: source, source_revision: 2, event_seq: 11 }));
   s = applyEvent(s, e("translation.partial", { source_revision: 2, source_status: "final", translation: "后台正式任务", event_seq: 12 }));
   assert.equal(orderedSegments(s)[0].translation, "后台正式任务");

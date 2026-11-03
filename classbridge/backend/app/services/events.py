@@ -40,10 +40,14 @@ def latest_segments(db, session_id):
 
 def serialize_segment(db, row):
     translation = db.query(Translation).filter_by(segment_id=row.id).order_by(Translation.translation_revision.desc()).first()
+    failed=db.query(ProcessingTask).filter_by(idempotency_key=f'translate:{row.id}',status='failed').first() if not translation else None
     return {'sentence_id':row.sentence_id,'stream_id':row.stream_id,'source_revision':row.source_revision,
             'translation_revision':translation.translation_revision if translation else 0,
             'start_ms':row.start_ms,'end_ms':row.end_ms,'text':row.text,
             'translation':translation.text if translation else '', 'status':('retired' if row.status=='retired' else 'final' if translation else 'translating'),
+            'source_status':row.status,'source_final':row.status=='final',
+            'translation_status':'final' if translation else 'failed' if failed else 'pending','translation_final':bool(translation),
+            'translation_error':failed.error if failed else None,
             'mode':row.mode,'speaker':row.speaker,'latency':row.latency,'provenance':row.provenance}
 
 
@@ -82,3 +86,35 @@ def save_translation(db, segment_id, text, revision=1):
     return emit(db,session,'translation.final',sentence_id=row.sentence_id,stream_id=row.stream_id,
                 source_revision=row.source_revision,translation_revision=revision,start_ms=row.start_ms,end_ms=row.end_ms,
                 text=row.text,translation=text,status='final',latency=row.latency)
+
+
+def save_interrupted(db, session_id, stream_id, snapshot):
+    """Recovery-only event. Never enqueue work or create a formal source revision."""
+    session=db.execute(select(Session).where(Session.id==session_id).with_for_update()).scalar_one_or_none()
+    if not session or session.active_stream_id!=stream_id:return None
+    sid=snapshot['sentence_id']
+    if db.query(SegmentRevision.id).filter_by(session_id=session_id,stream_id=stream_id,sentence_id=sid).first():return None
+    # Only called during bounded cleanup, not once per audio frame or partial.
+    prior=db.query(Event).filter_by(session_id=session_id,type='transcript.interrupted').order_by(Event.event_seq.desc())
+    for event in prior:
+        p=event.payload
+        if p.get('stream_id')==stream_id and p.get('sentence_id')==sid:
+            if p.get('source_revision',0)>=snapshot['source_revision']:return None
+            break
+    return emit(db,session,'transcript.interrupted',stream_id=stream_id,**snapshot,
+        source_status='interrupted',status='interrupted',source_final=False,translation_revision=0,
+        message='识别结束前未收到正式定稿；原文待确认，不能作为正式证据')
+
+
+def unconfirmed_segments(db, session_id):
+    """Caller must check session ownership; formal evidence queries stay unchanged."""
+    confirmed=set(db.query(SegmentRevision.stream_id,SegmentRevision.sentence_id).filter_by(session_id=session_id).all())
+    latest={}
+    for event in db.query(Event).filter_by(session_id=session_id,type='transcript.interrupted').order_by(Event.event_seq):
+        p=event.payload;key=(p.get('stream_id'),p.get('sentence_id'))
+        if key not in confirmed and all(key):
+            previous=latest.get(key)
+            if not previous or p.get('source_revision',0)>=previous.get('source_revision',0):
+                latest[key]={**p,'translation':'','translation_status':'pending','translation_final':False,
+                             'source_status':'interrupted','source_final':False,'source_event_seq':event.event_seq}
+    return sorted(latest.values(),key=lambda p:(p.get('start_ms',0),p.get('end_ms',0),p['sentence_id']))

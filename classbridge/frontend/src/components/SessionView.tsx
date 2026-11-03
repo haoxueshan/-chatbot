@@ -619,16 +619,9 @@ export function SessionView({
                     {formatTime(s.end_ms)}
                   </span>
                   <span className="segment-status">
-                    {s.translation_final ? (
-                      <>
-                        <Check size={12} />
-                        已定稿
-                      </>
-                    ) : s.source_final ? (
-                      "原文已定稿 · 正在翻译"
-                    ) : (
-                      "识别中 · 临时字幕"
-                    )}
+                    {s.source_status === "interrupted" ? "识别未完成 · 待确认" : s.source_final ? (
+                      <><Check size={12} />原文已定稿</>
+                    ) : "识别中 · 临时字幕"}
                   </span>
                   {s.mode === "demo" && <span className="demo-mark">模拟</span>}
                   <span className="revision">v{s.source_revision}</span>
@@ -665,7 +658,7 @@ export function SessionView({
                     </button>
                   )}
                 </div>
-                {showOriginal && (
+                {(showOriginal || s.source_status === "interrupted") && (
                   <p className="source-text" lang="und">
                     {!s.source_final && s.stable_preview !== undefined ? <>
                       <span className="stable-source-preview" title="相对稳定预览，仍可被识别服务修订">{s.stable_preview}</span>
@@ -677,13 +670,14 @@ export function SessionView({
                   className={`translation-text ${!s.translation_final ? "temporary" : ""}`}
                   style={{ fontSize: preferences.subtitle_size || 24 }}
                 >
-                  {s.translation || (
+                  {s.source_status === "interrupted" ? "对应原文尚未正式确认" : s.translation_status === "failed" ? "翻译失败，原文已保留" : s.translation || (
                     <span className="translation-waiting">
-                      <span className="typing-dots">•••</span> 正在理解这一句
+                      <span className="typing-dots">•••</span> 正在翻译…
                     </span>
                   )}
                 </p>
-                {s.translation && !s.translation_final && (
+                {s.translation_final && <small className="translation-status">中文已完成</small>}
+                {s.translation && !s.translation_final && s.translation_status !== "failed" && (
                   <small className="temporary-label">
                     {s.preview_source_text ? "临时中文预览 · 仅对应已翻译部分，可被替换" : "临时译文 · 会随原文修订"}
                   </small>
@@ -722,10 +716,10 @@ export function SessionView({
                     confirm("确定清空此会话的字幕与派生内容？此操作不可撤销。")
                   ) {
                     try {
-                      await request(`/sessions/${session.id}/segments`, {
+                      const result = await request<{event_seq?:number}>(`/sessions/${session.id}/segments`, {
                         method: "DELETE",
                       });
-                      live.clear();
+                      live.clear(result.event_seq);
                       refresh();
                     } catch (e) {
                       notify(e instanceof Error ? e.message : "清空失败");

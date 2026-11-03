@@ -98,7 +98,7 @@ test("higher-numbered provisional text cannot demote a stable sentence", () => {
   assert.equal(orderedSegments(state)[0].text, "source");
   assert.equal(orderedSegments(state)[0].translation, "稳定译文");
   assert.equal(orderedSegments(state)[0].source_revision, 1);
-  // A real new final version and its final-source streaming translation remain allowed.
+  // Translation metadata cannot establish a source; only the later ASR final can.
   state = applyEvent(
     state,
     event("translation.partial", {
@@ -108,6 +108,8 @@ test("higher-numbered provisional text cannot demote a stable sentence", () => {
       translation: "新",
     }),
   );
+  assert.equal(orderedSegments(state)[0].source_revision, 1);
+  state = applyEvent(state, event("transcript.final", { source_revision: 2, text: "new source" }));
   assert.equal(orderedSegments(state)[0].source_revision, 2);
   assert.equal(orderedSegments(state)[0].source_final, true);
 });
@@ -157,7 +159,7 @@ test("retirement tombstone and clear cursor survive out-of-order replay", () => 
   );
   assert.equal(orderedSegments(state).length, 0);
 });
-test("stopping removes provisional captions; stable final translations may finish", () => {
+test("stopping retains unconfirmed captions; stable final translations may finish", () => {
   let state = applyEvent(
     initialTranscript("session"),
     event("transcript.partial"),
@@ -170,7 +172,9 @@ test("stopping removes provisional captions; stable final translations may finis
     state,
     event("transcript.partial", { source_revision: 2 }),
   );
-  assert.equal(orderedSegments(state).length, 0);
+  assert.equal(orderedSegments(state).length, 1);
+  assert.equal(orderedSegments(state)[0].source_status, "interrupted");
+  assert.equal(orderedSegments(state)[0].source_final, false);
   state = applyEvent(
     state,
     event("transcript.final", { source_revision: 3, event_seq: 3 }),

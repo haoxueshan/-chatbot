@@ -217,7 +217,9 @@ async def execute_task(task_id):
             task.updated_at=now()
             row=db.get(Session,task.session_id) if task.session_id else None
             if row:
-                emit(db,row,'processing.failed',code=getattr(exc,'code','task_failed'),message=task.error,status=task.status,task_id=task.id,task_kind=task.kind)
+                source=db.get(SegmentRevision,task.payload.get('segment_id')) if task.kind=='translate' and task.payload.get('segment_id') else None
+                source_fields={'stream_id':source.stream_id,'sentence_id':source.sentence_id,'source_revision':source.source_revision} if source and source.session_id==row.id else {}
+                emit(db,row,'processing.failed',code=getattr(exc,'code','task_failed'),message=task.error,status=task.status,task_id=task.id,task_kind=task.kind,**source_fields)
             db.commit();logger.warning('task_failed kind=%s code=%s attempt=%d',task.kind,getattr(exc,'code',type(exc).__name__),task.attempts)
 
 

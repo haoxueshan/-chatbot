@@ -14,8 +14,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.api.auth import authenticate_cookie, COOKIE_NAME
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Session, RecognitionStream, Event, AudioAsset, User, ProcessingTask, uid
-from app.services.events import emit, save_final, enqueue
+from app.models import Session, RecognitionStream, Event, AudioAsset, User, ProcessingTask, SegmentRevision, uid
+from app.services.events import emit, save_final, enqueue, save_interrupted, latest_segments
 from app.services.timing import captured_duration_ms
 from app.services.retired_tasks import RETIRED_EVENT_TYPE
 
@@ -49,6 +49,7 @@ class LiveCapture:
         self.asr_enhancement={}
         self.received_audio_ms=0;self.last_audio_at=None;self.level_window=deque(maxlen=50)
         self.preview=None
+        self.unconfirmed={}
 
     def ensure_preview(self):
         if not settings.incremental_translation_enabled or self.mode!='real':return None
@@ -77,7 +78,7 @@ class LiveCapture:
             if self.preview and not self.stopping:self.preview.tick()
 
     async def send(self,payload):
-        async with self.send_lock: await self.ws.send_json(payload)
+        async with self.send_lock: await asyncio.wait_for(self.ws.send_json(payload),timeout=10)
 
     async def transient(self,event_type,**fields):
         await self.send({'type':event_type,'event_id':uid(),'event_seq':0,'session_id':self.session_id,
@@ -104,6 +105,7 @@ class LiveCapture:
             self.asr_metrics={};self.failure_reported=False
             self.received_audio_ms=0;self.last_audio_at=None;self.level_window.clear()
             self.preview=None
+            self.unconfirmed={}
             self.capture_ended=None;self.last_backlog_check=0
             self.queue=asyncio.Queue(maxsize=settings.audio_max_queue_frames)
             self.queued_bytes=0
@@ -261,6 +263,16 @@ class LiveCapture:
             # Final translation task separately reports failures durably. Partial attempts are optional and bounded.
             return
 
+    def trim_source_cache(self):
+        # Unfinished records have their own 200-entry limit; only completed
+        # identities are evicted. Database revisions still reject late callbacks.
+        while len(self.finalized)>512:
+            sid=next(key for key in self.current_revisions if key in self.finalized)
+            self.finalized.remove(sid)
+            for cache in (self.current_revisions,self.last_results,self.first_seen,self.last_translation):cache.pop(sid,None)
+            self.final_results={fp for fp in self.final_results if fp[0]!=sid}
+        while len(self.final_results)>2048:self.final_results.pop()
+
     async def consume(self,event):
         sid=f'{self.stream_id}:{event["sentence_id"]}'
         text=event.get('text','').strip()
@@ -275,12 +287,24 @@ class LiveCapture:
         if self.last_results.get(sid)==result:return
         fingerprint=(sid,text,start,end)
         if final and fingerprint in self.final_results:return
-        self.last_results[sid]=result
-        revision=self.current_revisions.get(sid,0)+1;self.current_revisions[sid]=revision
+        from app.providers.aliyun import ProviderError
+        if event.get('stream_id') not in (None,self.stream_id):return
+        with SessionLocal() as db:
+            session=db.get(Session,self.session_id)
+            if not session or session.active_stream_id!=self.stream_id:return
+            # Evicted completed identities recover their authority from the DB.
+            # This bounds live caches without imposing an extra recording duration limit.
+            if sid not in self.current_revisions:
+                saved=db.query(SegmentRevision).filter_by(session_id=self.session_id,stream_id=self.stream_id,sentence_id=sid).order_by(SegmentRevision.source_revision.desc()).first()
+                if saved:
+                    self.current_revisions[sid]=saved.source_revision;self.finalized.add(sid)
+                    self.trim_source_cache()
+                    if not final:return
+            if final and db.query(SegmentRevision.id).filter_by(session_id=self.session_id,stream_id=self.stream_id,
+                    sentence_id=sid,text=text,start_ms=start,end_ms=end).first():return
+        revision=self.current_revisions.get(sid,0)+1
         stamp=time.monotonic();self.first_seen.setdefault(sid,stamp)
         if final:
-            self.finalized.add(sid)
-            self.final_results.add(fingerprint)
             if sid in self.translation_tasks:self.translation_tasks[sid].cancel()
             preview_entry=self.preview.finalize(sid) if self.preview else None
             from app.services.incremental_translation import reuse_candidate
@@ -289,11 +313,30 @@ class LiveCapture:
             if preview_entry and preview_entry.first_output_at is not None:
                 preview_latency={'preview_first_ms':max(0,int((preview_entry.first_output_at-self.started)*1000)-int(event.get('start_ms') or 0)),
                     'preview_clock':'server_estimate_from_source_audio_start'}
-            with SessionLocal() as db:
-                save_final(db,self.session_id,self.stream_id,sid,revision,text,start,max(start,end),
-                    latency={'source_first_ms':max(0,int((self.first_seen[sid]-self.started)*1000)-int(event.get('start_ms') or 0)),
-                             'source_final_ms':max(0,int((stamp-self.started)*1000)-int(event.get('end_ms') or 0)),**preview_latency},preview_candidate=candidate)
+            try:
+                with SessionLocal() as db:
+                    saved=save_final(db,self.session_id,self.stream_id,sid,revision,text,start,max(start,end),
+                        latency={'source_first_ms':max(0,int((self.first_seen[sid]-self.started)*1000)-int(event.get('start_ms') or 0)),
+                                 'source_final_ms':max(0,int((stamp-self.started)*1000)-int(event.get('end_ms') or 0)),**preview_latency},preview_candidate=candidate)
+                    if saved is None:
+                        row=db.get(Session,self.session_id)
+                        if not row or row.active_stream_id!=self.stream_id:return
+                        existing=db.query(SegmentRevision).filter_by(session_id=self.session_id,stream_id=self.stream_id,sentence_id=sid,source_revision=revision).first()
+                        if not existing or (existing.text,existing.start_ms,existing.end_ms)!=(text,start,end):
+                            raise ValueError('source_revision_conflict')
+            except Exception as exc:
+                raise ProviderError('source_storage_failed','正式原文保存失败，未标记定稿成功；请检查数据库。',diagnostics={'exception_type':type(exc).__name__}) from exc
+            # Only committed or verified idempotent final results own these markers.
+            self.current_revisions[sid]=revision;self.last_results[sid]=result
+            self.finalized.add(sid);self.final_results.add(fingerprint);self.unconfirmed.pop(sid,None)
+            self.trim_source_cache()
         else:
+            if sid not in self.unconfirmed and len(self.unconfirmed)>=200:
+                raise ProviderError('source_buffer_full','未定稿原文积压超过保护上限，已停止采集并保留未确认记录。')
+            self.current_revisions[sid]=revision;self.last_results[sid]=result
+            self.unconfirmed[sid]={'sentence_id':sid,'source_revision':revision,'text':text,
+                'start_ms':start,'end_ms':end,'last_received_at':datetime.now(timezone.utc).isoformat()}
+            self.translation_tasks={sid:t for sid,t in self.translation_tasks.items() if not t.done()}
             preview=self.ensure_preview()
             fields={}
             if preview:
@@ -316,6 +359,7 @@ class LiveCapture:
         for i,(original,translation) in enumerate(DEMO_SENTENCES):
             if self.stopping:break
             sid=f'{self.stream_id}:{i}';start=self.offset+i*7000;end=start+6200
+            self.unconfirmed[sid]={'sentence_id':sid,'source_revision':1,'text':original[:len(original)//2],'start_ms':start,'end_ms':end,'last_received_at':datetime.now(timezone.utc).isoformat()}
             await self.transient('transcript.partial',sentence_id=sid,source_revision=1,translation_revision=0,start_ms=start,end_ms=end,text=original[:len(original)//2],status='partial')
             await asyncio.sleep(.65)
             await self.transient('translation.partial',sentence_id=sid,source_revision=1,translation_revision=1,start_ms=start,end_ms=end,translation=translation[:len(translation)//2],status='partial')
@@ -323,6 +367,7 @@ class LiveCapture:
             with SessionLocal() as db:
                 save_final(db,self.session_id,self.stream_id,sid,2,original,start,end,translation=translation,
                   latency={'source_first_ms':0,'source_final_ms':650,'translation_first_ms':650,'translation_final_ms':1300,'synthetic':True})
+            self.unconfirmed.pop(sid,None)
             await asyncio.sleep(1.6)
 
     async def run(self):
@@ -393,18 +438,27 @@ class LiveCapture:
                     self.audio_file=None
                     if saved_audio:
                         with contextlib.suppress(OSError):self.audio_path.unlink(missing_ok=True)
-            with SessionLocal() as db:
-                row=db.get(Session,self.session_id)
-                stream=db.get(RecognitionStream,self.stream_id)
-                ended=self.capture_ended or time.monotonic()
-                elapsed=max(0,int((ended-self.started)*1000)) if self.started else 0
-                if stream:stream.status='stopped' if self.ready else 'cancelled';stream.ended_ms=self.offset+elapsed
-                if row and row.active_stream_id==self.stream_id:
-                    row.duration_ms=max(row.duration_ms,self.offset+elapsed)
-                    row.status='stopped';emit(db,row,'session.state',state='stopped',status='stopped',captured_ms=self.captured_before+elapsed,request_id=self.request_id)
-                    if self.ready:enqueue(db,row.user_id,'summarize',f'summary:stop:{self.stream_id}',{'session_id':row.id,'user_id':row.user_id},session_id=row.id)
-                    row.active_stream_id=None
-                db.commit()
+            try:
+                with SessionLocal() as db:
+                    row=db.get(Session,self.session_id)
+                    stream=db.get(RecognitionStream,self.stream_id)
+                    ended=self.capture_ended or time.monotonic()
+                    elapsed=max(0,int((ended-self.started)*1000)) if self.started else 0
+                    if stream:stream.status='stopped' if self.ready else 'cancelled';stream.ended_ms=self.offset+elapsed
+                    if row and row.active_stream_id==self.stream_id:
+                        row.duration_ms=max(row.duration_ms,self.offset+elapsed)
+                        for snapshot in self.unconfirmed.values():save_interrupted(db,row.id,self.stream_id,snapshot)
+                        row.status='stopped';emit(db,row,'session.state',state='stopped',status='stopped',captured_ms=self.captured_before+elapsed,request_id=self.request_id)
+                        if self.ready and latest_segments(db,row.id):enqueue(db,row.user_id,'summarize',f'summary:stop:{self.stream_id}',{'session_id':row.id,'user_id':row.user_id},session_id=row.id)
+                        row.active_stream_id=None
+                    db.commit()
+                self.unconfirmed.clear()
+            except Exception as exc:
+                logger.error('source_cleanup_failed session_id=%s stream_id=%s exception_type=%s',self.session_id,self.stream_id,type(exc).__name__)
+                with contextlib.suppress(Exception):
+                    await self.transient('processing.failed',request_id=self.request_id,code='source_storage_failed',
+                        message='未确认原文或停止状态保存失败；不能保证刷新后恢复，请检查数据库。',status='failed')
+
 
     async def report_health(self):
         while True:
@@ -418,7 +472,7 @@ class LiveCapture:
             if not self.ready:continue
             with SessionLocal() as db:
                 row=db.get(Session,self.session_id)
-                if not row:return
+                if not row or not latest_segments(db,row.id):continue
                 enqueue(db,row.user_id,'summarize',f'summary:{self.stream_id}:{int((time.monotonic()-self.started)//settings.summary_interval_seconds)}',{'session_id':row.id,'user_id':row.user_id},session_id=row.id)
                 db.commit()
 

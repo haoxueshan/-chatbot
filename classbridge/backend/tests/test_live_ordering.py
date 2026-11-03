@@ -40,6 +40,7 @@ async def test_final_is_not_demoted_by_late_partial_or_duplicated(factory):
 
 @pytest.mark.asyncio
 async def test_empty_and_repeated_hypotheses_do_not_invalidate_revision(factory):
+    with factory() as db:seed(db,mode='real')
     capture = LiveCapture(AsyncMock(), 'lesson', 'alice')
     capture.stream_id = 'stream'
     capture.started = time.monotonic()
