@@ -70,33 +70,6 @@ export function applyEvent(
       };
     }
   }
-  if (event.type === "segment.suggestion") {
-    if (!event.stream_id || !event.sentence_id) return next;
-    const key = identity({
-      stream_id: event.stream_id,
-      sentence_id: event.sentence_id,
-    });
-    const old = state.segments[key];
-    if (
-      !old ||
-      !old.source_final ||
-      old.status === "retired" ||
-      old.source_revision !== event.source_revision ||
-      (event.event_seq > 0 && event.event_seq < (old.suggestion_event_seq || 0))
-    )
-      return next;
-    return {
-      ...next,
-      segments: {
-        ...state.segments,
-        [key]: {
-          ...old,
-          suggestion: event.suggestion,
-          suggestion_event_seq: event.event_seq || old.suggestion_event_seq,
-        },
-      },
-    };
-  }
   if (
     !event.sentence_id ||
     !event.stream_id ||
@@ -241,15 +214,6 @@ export function applyEvent(
     if (event.text && !value.text) value.text = event.text;
   }
   value.start_ms = event.start_ms ?? value.start_ms;
-  if (
-    event.type === "segment.updated" &&
-    event.suggestion !== undefined &&
-    (event.snapshot_seq || 0) >= (value.suggestion_event_seq || 0)
-  ) {
-    value.suggestion = event.suggestion;
-    value.suggestion_event_seq =
-      event.snapshot_seq || value.suggestion_event_seq;
-  }
   if (event.provenance) value.provenance = event.provenance;
   if (event.latency) value.latency = { ...value.latency, ...event.latency };
   value.speaker = event.speaker ?? value.speaker;

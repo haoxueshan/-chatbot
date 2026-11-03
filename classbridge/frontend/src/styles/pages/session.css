@@ -6,31 +6,6 @@
 .capture-health summary {
   cursor: pointer;
 }
-.correction-card {
-  margin-top: 14px;
-  padding: 14px;
-  border: 1px dashed var(--cb-soft);
-  border-radius: 10px;
-}
-.correction-card > p {
-  margin: 8px 0;
-}
-.correction-card summary {
-  cursor: pointer;
-}
-.correction-evidence {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-  font-size: 12px;
-}
-.correction-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 12px;
-}
 .session-view {
   display: flex;
   flex-direction: column;

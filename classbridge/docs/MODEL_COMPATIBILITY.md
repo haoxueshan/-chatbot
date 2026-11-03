@@ -2,7 +2,6 @@
 
 2026-11-02识别逻辑复核：官方[客户端事件](https://help.aliyun.com/zh/model-studio/qwen-audio-asr-streaming-client-events)仍要求task-started后发送音频、finish-task结束；max_sentence_silence默认800ms。[服务端事件](https://help.aliyun.com/zh/model-studio/qwen-audio-asr-streaming-server-events)以sentence_id关联句子，sentence_end区分中间/最终结果。适配增加启动task_id校验，应用去重重复定稿并拒绝迟到中间结果降级；没有新增云端请求参数。这一轮只做协议文档复核和本地测试，没有新增真实API或课堂效果验证，详见ASR_LOGIC_REVIEW.md。
 
-2026-11-02规律/上下文辅助推断：已复核[ASR客户端事件](https://help.aliyun.com/zh/model-studio/qwen-audio-asr-streaming-client-events)、[上下文增强](https://help.aliyun.com/zh/model-studio/improve-asr-accuracy)与[文本模型](https://help.aliyun.com/zh/model-studio/text-generation-model)。持续ASR仍使用run-task时的官方词表/背景，不编造中途更新参数。新增异步文字校对调用qwen3.7-flash（CORRECTION_MODEL可配置），参考韩语语法、近音形式、前文和用户术语，生成待确认建议；没有将文字推测称为重新听音频或声学置信度。
 
 本轮真实验证使用人工构造的韩语文字样本，两次文本模型调用（首次调用后Windows GBK控制台输出韩文失败，第二次完整记录）：原文“오늘은 작업 기역을 배웁니다.”，提供术语“작업기억”后返回一处通过服务器校验的修改，候选为“오늘은 작업기억을 배웁니다.”。样本在独立临时数据库中运行并清理，不修改用户已有字幕。两次均是付费文本模型入口；没有新音频识别调用，没有真实课堂准确率结论。
 

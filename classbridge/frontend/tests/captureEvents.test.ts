@@ -70,7 +70,7 @@ test("start rejection, draining, and background failures retain distinct identit
   );
   assert.equal(
     isCurrentCaptureEvent(
-      event({ request_id: "new-request", task_kind: "suggest_correction" }),
+      event({ request_id: "new-request", task_kind: "translate" }),
       "new-request",
       null,
       5,

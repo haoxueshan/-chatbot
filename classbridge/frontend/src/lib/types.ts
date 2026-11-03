@@ -5,8 +5,6 @@ export interface User {
   username: string;
 }
 export interface Segment {
-  suggestion?: CorrectionSuggestion | null;
-  suggestion_event_seq?: number;
   provenance?: string;
   sentence_id: string;
   stream_id: string;
@@ -30,15 +28,6 @@ export interface Segment {
   translation_event_seq?: number;
   speaker?: string | null;
   latency?: Record<string, number | string | boolean | null>;
-}
-export interface CorrectionSuggestion {
-  task_id: string;
-  status: "unconfirmed";
-  source_revision: number;
-  audio_verified: false;
-  suggested_text: string;
-  edits: { before: string; after: string; reason: string; kind: string; evidence_ids: string[] }[];
-  evidence: { id: string; kind: string; quote: string; sentence_id?: string; source_revision?: number; session_id?: string }[];
 }
 export interface Stage {
   id: string;
@@ -93,7 +82,6 @@ export interface BridgeEvent extends Partial<Segment> {
   captured_ms?: number;
   ready?: boolean;
   request_id?: string;
-  snapshot_seq?: number;
   asr_language_mode?: import("./asrLanguages").ASRLanguageMode;
   asr_acoustic_profile?: "far" | "near";
   asr_enhancement?: { hotword_count: number; weight: number; context_chars: number };
@@ -139,7 +127,6 @@ export interface ChatReply {
   mode: Mode;
 }
 export interface Preferences {
-  asr_assist_enabled?: boolean;
   asr_hotword_weight?: 2 | 3 | 4;
   asr_acoustic_profile?: "far" | "near";
   audio_processing_mode?: "standard" | "natural";

@@ -400,7 +400,6 @@ test("settings preserve all fields and classroom preset saves only on explicit s
     "录音与麦克风",
     "音频与隐私",
     "模型连接状态",
-    "上下文辅助校正",
     "识别热词强度",
   ])
     assert.ok(view.container.textContent!.includes(label));

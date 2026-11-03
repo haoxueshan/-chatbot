@@ -10,6 +10,7 @@ from app.db import SessionLocal
 from app.models import ProcessingTask, Outbox, Session, SegmentRevision, Translation, AudioAsset, RecognitionStream, User, now
 from app.services.events import emit, save_translation, save_final, enqueue, latest_segments
 from app.services.translation_timing import TranslationTiming, wall_queue_ms
+from app.services.retired_tasks import RETIRED_TASK_KIND, cancel_retired_task, cancel_retired_tasks
 
 logger=logging.getLogger('classbridge.tasks')
 celery_app=Celery('classbridge',broker=settings.redis_url,backend=settings.redis_url)
@@ -163,15 +164,16 @@ async def reprocess(db,task):
 async def execute_task(task_id):
     with SessionLocal() as db:
         task=db.execute(select(ProcessingTask).where(ProcessingTask.id==task_id).with_for_update()).scalar_one_or_none()
+        if task and task.kind==RETIRED_TASK_KIND:
+            # Broker deliveries from the old release must never reach a model,
+            # even when a retry or an abandoned running task is replayed.
+            cancel_retired_task(task);db.commit();return
         if not task or task.status not in ('pending','retry'):return
         if task.attempts>=task.max_attempts:
             task.status='failed';task.error='已达到有限重试上限';db.commit();return
         task.status='running';task.attempts+=1;task.updated_at=now();db.commit()
         try:
             if task.kind=='translate': result=await translate(db,task)
-            elif task.kind=='suggest_correction':
-                from app.services.correction import suggest
-                result=await suggest(db,task)
             elif task.kind=='reprocess': result=await reprocess(db,task)
             elif task.kind=='export':
                 from app.api.sessions import export_text
@@ -224,6 +226,7 @@ def process_task(task_id):asyncio.run(execute_task(task_id))
 
 
 def pending_task_ids(db):
+    if cancel_retired_tasks(db):db.commit()
     current=now()
     query=db.query(ProcessingTask).filter(ProcessingTask.status.in_(['pending','retry']))
     if settings.incremental_translation_enabled:
@@ -264,6 +267,7 @@ def expire_audio():
 @celery_app.task(name='classbridge.recover_abandoned')
 def recover_abandoned():
     with SessionLocal() as db:
+        cancel_retired_tasks(db)
         for task in db.query(ProcessingTask).filter(ProcessingTask.status=='running',ProcessingTask.updated_at<now()-timedelta(minutes=15)):
             # Recovery is deliberately conservative for chargeable operations.
             task.status='failed';task.error='后台进程中断，结果不确定；已停止自动重试以避免重复调用'

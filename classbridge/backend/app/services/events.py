@@ -39,15 +39,12 @@ def latest_segments(db, session_id):
 
 
 def serialize_segment(db, row):
-    from app.services.correction import visible_suggestion
-    task=db.query(ProcessingTask).filter_by(idempotency_key=f'correction:{row.id}').first()
     translation = db.query(Translation).filter_by(segment_id=row.id).order_by(Translation.translation_revision.desc()).first()
     return {'sentence_id':row.sentence_id,'stream_id':row.stream_id,'source_revision':row.source_revision,
             'translation_revision':translation.translation_revision if translation else 0,
             'start_ms':row.start_ms,'end_ms':row.end_ms,'text':row.text,
             'translation':translation.text if translation else '', 'status':('retired' if row.status=='retired' else 'final' if translation else 'translating'),
-            'mode':row.mode,'speaker':row.speaker,'latency':row.latency,'provenance':row.provenance,
-            'suggestion':visible_suggestion(task)}
+            'mode':row.mode,'speaker':row.speaker,'latency':row.latency,'provenance':row.provenance}
 
 
 def save_final(db, session_id, stream_id, sentence_id, revision, text, start_ms, end_ms, translation=None, latency=None, provenance='realtime', force=False, commit=True, preview_candidate=None):
@@ -69,8 +66,6 @@ def save_final(db, session_id, stream_id, sentence_id, revision, text, start_ms,
         if preview_candidate is not None:task_payload['preview_candidate']=preview_candidate
         enqueue(db,session.user_id,'translate',f'translate:{row.id}',task_payload,session_id=session_id)
     session.duration_ms = max(session.duration_ms,end_ms)
-    from app.services.correction import queue_assist
-    queue_assist(db,row)
     if commit:db.commit()
     return payload
 

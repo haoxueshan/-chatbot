@@ -17,6 +17,7 @@ from app.db import SessionLocal
 from app.models import Session, RecognitionStream, Event, AudioAsset, User, ProcessingTask, uid
 from app.services.events import emit, save_final, enqueue
 from app.services.timing import captured_duration_ms
+from app.services.retired_tasks import RETIRED_EVENT_TYPE
 
 router=APIRouter()
 logger=logging.getLogger('classbridge.ws')
@@ -450,7 +451,8 @@ async def websocket_session(ws:WebSocket,session_id:str,after_seq:int=0):
             with SessionLocal() as db:
                 events=db.query(Event).filter(Event.session_id==session_id,Event.event_seq>seq).order_by(Event.event_seq).limit(500).all()
                 for event in events:
-                    await capture.send(event.payload);seq=event.event_seq
+                    if event.type!=RETIRED_EVENT_TYPE:await capture.send(event.payload)
+                    seq=event.event_seq
             await asyncio.sleep(.12)
 
     sender=asyncio.create_task(publisher())

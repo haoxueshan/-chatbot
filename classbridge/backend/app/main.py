@@ -24,7 +24,9 @@ async def lifespan(app):
     # An interrupted API process cannot keep a phantom microphone running after restart.
     from app.models import Session, RecognitionStream
     from app.services.events import emit
+    from app.services.retired_tasks import cancel_retired_tasks
     with SessionLocal() as db:
+        cancel_retired_tasks(db)
         for row in db.query(Session).filter(Session.status.in_(['preparing','recording','processing'])):
             emit(db,row,'capture.gap',message='服务器重启，未保存音频无法恢复',duration_ms=None,status='gap')
             row.status='stopped';row.active_stream_id=None

@@ -29,7 +29,6 @@ import { formatDate, formatTime, post, request } from "../lib/api";
 import { useLive } from "../lib/useLive";
 import { buildTimeline } from "../lib/timeline";
 import { recognitionStatus } from "../lib/captureHealth";
-import { CorrectionCard } from "./CorrectionCard";
 import { asrLanguageLabels } from "../lib/asrLanguages";
 import type { Citation, Preferences, Session, Stage } from "../lib/types";
 import { Chat } from "./Chat";
@@ -692,9 +691,6 @@ export function SessionView({
                 {s.provenance === "user_correction" && <button className="text-button" onClick={() => void jumpEvidence(s.sentence_id, s.source_revision - 1)}>
                   已人工采纳校正 · 查看校正前原文 v{s.source_revision - 1}
                 </button>}
-                {s.suggestion && <CorrectionCard key={s.suggestion.task_id} suggestion={s.suggestion}
-                  sessionId={session.id} active={live.active || live.settling} saved={refresh} notify={notify}
-                  jump={(id, revision) => void jumpEvidence(id, revision)} />}
               </article>
               );
             })}

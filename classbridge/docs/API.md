@@ -64,7 +64,6 @@ Session返回captured_ms（已结束识别流的累计采音时长），与durat
 | translation.partial | 临时译文；source_status=final时是稳定原文的流式译文 |
 | translation.final | 绑定原文版本的最终译文 |
 | segment.updated | 版本更新或retired墓碑，不能简单字符串追加 |
-| segment.suggestion | 绑定原文版本的辅助校正建议，或suggestion=null表示忽略；独立于原文/译文，不直接入索引 |
 | processing.failed | 可读错误code/message；带task_kind的后台失败不等同麦克风断线 |
 | capture.gap | 已知或未知时长缺口，不能恢复未上传音频 |
 | capture.health | 真实采集中每2秒的瞬时诊断，不入数据库、不重放；前端仅接收当前stream_id |
@@ -85,19 +84,9 @@ GET/PATCH /api/settings支持asr_language_mode：auto（默认，省略云端lan
 
 新增asr_hotword_weight（2/3/4，默认2）及asr_context（字符串，最多400字符，默认空）。字段超限返回422，不修改已有设置。课程背景仅使用当前用户明确填写的内容，不自动使用可能错误的历史ASR字幕。GET返回只读asr_terms_status={enabled_count,skipped:[{index,reason}]}，index为原术语列表0基索引；无效词条在原列表保留便于编辑/翻译，但不送入识别热词。NFC规范化后按官方长度规则过滤，重复原词合并。session.state ready携带asr_enhancement={hotword_count,weight,context_chars}，只显示本次请求采用的数量，不宣称模型一定遵循或准确率提高。
 
-`asr_assist_enabled`（默认false）控制文本辅助推断。启用后真实模式的4–1500字符、含至少2个韩文音节的稳定原文可进入抽查；每会话每15秒最多安排一句，最多4个待处理任务，不是每句都检查。模型由服务端CORRECTION_MODEL配置（默认qwen3.7-flash）。任务kind=suggest_correction与字幕/outbox同事务，单次尝试，失败后不自动重新调用；不据此承诺云端计费结果。关闭功能后待处理任务跳过，在途响应不再发布建议。
-
-建议只使用当前用户的术语/背景快照及同会话此前两分钟内最多3条稳定原文。前文也可能有ASR错误，不是音频核实。输出最多3处可定位的小改动，服务端校验原片段唯一性、证据ID、非重叠、变化比例、数字及常见否定词保护。term替换必须在已填术语/背景中出现。语法/近音判断仍可能错误，不提供虚假的声学置信度。结果保存在ProcessingTask.result；不增加数据库表或迁移。
-
-会话详情的每个segment可带suggestion，含task_id、source_revision、suggested_text、edits、服务端解析后的evidence及固定audio_verified=false。事件与任务结果在同一事务提交。推测不进入原文、翻译、RAG、摘要或导出；模型不能自行确认。前端按原文版本与event_seq处理，HTTP快照携带snapshot_seq防止旧快照恢复已忽略建议。
-
-`POST /api/sessions/{session_id}/corrections/{task_id}/accept`：登录、Origin及会话/任务归属校验；只可在停止录音并收尾后使用。过期来源返回409。接受建议创建source_revision+1、provenance=user_correction的新版本，并事务投递翻译、索引、摘要任务；旧原文及引用保留。重复采纳不重复创建版本。
-
-`POST /api/sessions/{session_id}/corrections/{task_id}/dismiss`：忽略建议并持久化null事件，原文保留，可在录音中执行。关闭或删除会话时按现有任务级联规则处理建议；删除后迟到结果无法重建数据。
-
 翻译/向量等HTTP请求复用经过校验的TLS上下文，首次证书加载在线程执行，避免阻塞实时收发；每个HTTP客户端仍按请求关闭。课程术语的原词映射到ASR官方vocabulary，默认权重2、最多200项，语种提示按用户asr_language_mode配置；不符合官方热词长度规则的项不送入ASR。
 
-采音控制事件以request_id和stream_id绑定本次开始，包含开始拒绝、preparing、ready、processing、processing.failed和stopped。前端保留身份直至收尾结束，同时检查请求前event_seq，重放旧停止/失败事件不会影响新采音。后台任务失败仍通过task_kind区分。识别源空结果/重复回调不增长版本，定稿后忽略同句partial；同流同句已见定稿按原文及时间戳去重。真实不同的定稿保留新版本；人工校正使用独立版本接口。
+采音控制事件以request_id和stream_id绑定本次开始，包含开始拒绝、preparing、ready、processing、processing.failed和stopped。前端保留身份直至收尾结束，同时检查请求前event_seq，重放旧停止/失败事件不会影响新采音。后台任务失败仍通过task_kind区分。识别源空结果/重复回调不增长版本，定稿后忽略同句partial；同流同句已见定稿按原文及时间戳去重。真实不同的定稿保留新版本；历史人工采纳版本仍可通过 versions 接口追溯。
 
 引用返回服务端分配的id/label、原句或chunk_id、来源版本、时间范围或页码/位置和quote。服务端只接受候选集内的模型证据编号，并重复验证用户权限、版本、原文；没有可验证引用的模型回答改为证据不足。引用不是可执行指令。
 

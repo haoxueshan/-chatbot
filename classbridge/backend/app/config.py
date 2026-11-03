@@ -26,7 +26,6 @@ class Settings(BaseSettings):
     filetrans_model: str = 'qwen-audio-3.1-asr-flash-filetrans'
     translation_model: str = 'qwen-mt-flash'
     summary_model: str = 'qwen3.7-flash'
-    correction_model: str = 'qwen3.7-flash'
     answer_model: str = 'qwen3.7-plus'
     embedding_model: str = 'text-embedding-v4'
     rerank_model: str = 'qwen3-rerank'

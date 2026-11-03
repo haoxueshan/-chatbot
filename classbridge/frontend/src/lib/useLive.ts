@@ -93,9 +93,8 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
         const event = {
           ...segment,
           session_id: session.id,
-          event_id: `snapshot:${segment.sentence_id}:${segment.source_revision}:${segment.translation_revision}:${session.event_seq || 0}:${segment.suggestion?.task_id || "none"}`,
+          event_id: `snapshot:${segment.sentence_id}:${segment.source_revision}:${segment.translation_revision}:${session.event_seq || 0}`,
           event_seq: 0,
-          snapshot_seq: session.event_seq || 0,
           type: "segment.updated",
           translation: segment.translation || undefined,
         };

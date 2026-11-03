@@ -6,7 +6,6 @@ from fastapi.responses import Response
 from app.schemas.sessions import CreateSession, ExportRequest
 from typing import Literal
 from sqlalchemy import or_
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 from app.api.auth import current_user
 from app.config import settings
@@ -14,6 +13,7 @@ from app.db import get_db
 from app.models import User, Session, SegmentRevision, Translation, Event, Stage, AudioAsset, RecognitionStream, Chunk, Chat, Citation, ProcessingTask, Outbox, Fact, ActionItem, Document
 from app.services.events import latest_segments, serialize_segment, enqueue, emit
 from app.services.timing import captured_duration_ms
+from app.services.retired_tasks import RETIRED_TASK_KIND
 from app.schemas.stages import stage_text
 
 router = APIRouter(prefix='/api/sessions', tags=['Sessions'])
@@ -47,7 +47,7 @@ def session_dict(db, row, detail=False):
         result['segments'] = [serialize_segment(db,s) for s in current_segments]
         result['stages'] = [stage_dict(s,current_versions) for s in db.query(Stage).filter_by(session_id=row.id).order_by(Stage.created_at).all()]
         result['gaps'] = [e.payload for e in db.query(Event).filter_by(session_id=row.id,type='capture.gap').order_by(Event.event_seq).all()]
-        result['tasks'] = [{'id':t.id,'kind':t.kind,'status':t.status,'error':t.error} for t in db.query(ProcessingTask).filter_by(session_id=row.id).order_by(ProcessingTask.created_at.desc()).limit(30)]
+        result['tasks'] = [{'id':t.id,'kind':t.kind,'status':t.status,'error':t.error} for t in db.query(ProcessingTask).filter_by(session_id=row.id).filter(ProcessingTask.kind!=RETIRED_TASK_KIND).order_by(ProcessingTask.created_at.desc()).limit(30)]
         result['audio'] = [{'id':a.id,'offset_ms':a.offset_ms,'duration_ms':a.duration_ms,'status':a.status,'expires_at':a.expires_at.isoformat(),'gaps':a.gaps} for a in audio]
     return result
 
@@ -80,44 +80,6 @@ def get_session(session_id:str,user:User=Depends(current_user),db:DBSession=Depe
 def prevent_active(row):
     if row.status in ('preparing','recording','processing'):
         raise HTTPException(409,detail={'code':'session_active','message':'请先停止录音并等待收尾后再操作'})
-
-
-@router.post('/{session_id}/corrections/{task_id}/{action}')
-def decide_correction(session_id:str,task_id:str,action:Literal['accept','dismiss'],user:User=Depends(current_user),db:DBSession=Depends(get_db)):
-    row=db.query(Session).filter_by(id=session_id,user_id=user.id).with_for_update().first()
-    if not row:raise HTTPException(404,detail='会话不存在')
-    task=db.query(ProcessingTask).filter_by(id=task_id,session_id=row.id,user_id=user.id,kind='suggest_correction').with_for_update().first()
-    if not task or task.status!='completed':raise HTTPException(404,detail='校正建议不存在')
-    result=task.result or {}
-    if result.get('status')=='accepted':return {'status':'accepted','source_revision':result.get('accepted_revision')}
-    if result.get('status')=='dismissed' and action=='dismiss':return {'status':'dismissed'}
-    source=db.get(SegmentRevision,task.payload.get('segment_id'))
-    if not source or source.session_id!=row.id or result.get('status')!='suggested':raise HTTPException(409,detail='建议已失效')
-    current=next((s for s in latest_segments(db,row.id) if s.sentence_id==source.sentence_id),None)
-    if not current or current.id!=source.id:raise HTTPException(409,detail='原文已有新版本，请使用新版本的建议')
-    if action=='dismiss':
-        task.result={**result,'status':'dismissed'}
-        emit(db,row,'segment.suggestion',stream_id=source.stream_id,sentence_id=source.sentence_id,
-            source_revision=source.source_revision,suggestion=None)
-        db.commit();return {'status':'dismissed'}
-    prevent_active(row)
-    from app.services.correction import validate_edits
-    validated=validate_edits(source.text,{'edits':result.get('edits')},result.get('evidence',[]))
-    if not validated or validated['suggested_text']!=result.get('suggested_text'):
-        raise HTTPException(409,detail='建议校验失败，原文保留')
-    from app.services.events import save_final
-    revision=source.source_revision+1
-    try:
-        save_final(db,row.id,source.stream_id,source.sentence_id,revision,validated['suggested_text'],source.start_ms,source.end_ms,
-            provenance='user_correction',force=True,commit=False)
-        corrected=db.query(SegmentRevision).filter_by(session_id=row.id,sentence_id=source.sentence_id,source_revision=revision).one()
-        corrected.speaker=source.speaker
-        task.result={**result,'status':'accepted','accepted_revision':revision}
-        enqueue(db,user.id,'summarize',f'summary:correction:{corrected.id}',{'session_id':row.id,'user_id':user.id},session_id=row.id)
-        db.commit()
-    except IntegrityError:
-        db.rollback();raise HTTPException(409,detail='原文已更新，请刷新后查看')
-    return {'status':'accepted','source_revision':revision}
 
 
 def remove_derived(db,row):

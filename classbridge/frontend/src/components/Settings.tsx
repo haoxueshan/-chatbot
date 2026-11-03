@@ -279,22 +279,6 @@ export function Settings({
               示例不会自动加入模型请求
             </small>
           </label>
-          <label className="settings-row">
-            <div>
-              <strong>上下文辅助校正</strong>
-              <small>
-                根据韩语语法、近音词、同一会话前文和已填术语，生成待确认建议。只分析文字，不等于重听音频；每15秒最多安排一句抽查，额外调用文本模型。原文先显示，停止录音后可采纳为新版本。
-              </small>
-            </div>
-            <input
-              className="switch"
-              type="checkbox"
-              checked={draft.asr_assist_enabled || false}
-              onChange={(e) =>
-                setDraft({ ...draft, asr_assist_enabled: e.target.checked })
-              }
-            />
-          </label>
         </Card>
         <Card className="settings-card">
           <div className="settings-title">
@@ -423,7 +407,6 @@ export function Settings({
                     asr: "流式语音识别",
                     translation: "中文翻译",
                     summary: "阶段提取",
-                    correction: "上下文辅助校正",
                     answer: "RAG 回答",
                     embedding: "向量模型",
                     rerank: "重排模型",
