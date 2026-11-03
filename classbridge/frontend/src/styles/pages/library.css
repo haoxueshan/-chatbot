@@ -1,0 +1,236 @@
+/* ClassBridge / Minomeet MIT styles, migrated by responsibility. */
+.upload-zone {
+  background: var(--cb-panel);
+  border: 1px dashed #d0c6e3;
+  border-radius: 12px;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 25px;
+  margin-bottom: 30px;
+  text-align: center;
+  border-color: hsl(var(--input));
+}
+.upload-zone .empty-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  margin-bottom: 13px;
+}
+.upload-zone h3 {
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+.upload-zone p {
+  font-size: 12px;
+  color: var(--cb-muted);
+}
+.inline-link {
+  font-size: inherit;
+  color: var(--cb-accent);
+  padding: 0 4px;
+}
+.upload-zone > small {
+  font-size: 12px;
+  color: var(--cb-muted);
+  margin-top: 9px;
+}
+.upload-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--cb-muted);
+  margin-top: 20px;
+}
+.upload-mode select {
+  font-size: 12px;
+  padding: 6px 9px;
+  max-width: 280px;
+}
+.document-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.document-card {
+  border: 1px solid var(--cb-border);
+  border-radius: var(--radius);
+  padding: 20px;
+  background: var(--cb-panel);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.document-card > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.file-type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cb-soft);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+.document-card h3 {
+  font-size: 13px;
+  line-height: 1.7;
+  word-break: break-all;
+  margin-bottom: 6px;
+}
+.document-card > .tiny {
+  font-size: 12px;
+  margin-bottom: 15px;
+}
+.document-card > .badge {
+  margin-bottom: 15px;
+  font-size: 12px;
+}
+.document-open {
+  font-size: 12px;
+  color: var(--cb-accent);
+  padding-top: 14px;
+  margin-top: auto;
+  border-top: 1px solid var(--cb-border);
+  width: 100%;
+  justify-content: flex-start;
+  gap: 6px;
+}
+.document-open > svg:last-child {
+  margin-left: auto;
+}
+.error-note {
+  font-size: 12px;
+  color: var(--cb-soft);
+  line-height: 1.8;
+  margin-bottom: 15px;
+}
+.document-preview {
+  width: 760px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.document-preview .modal-title {
+  margin-bottom: 5px;
+  flex: none;
+}
+.document-preview h2 {
+  font-size: 17px;
+  line-height: 1.7;
+  word-break: break-all;
+  margin: 0;
+}
+.document-preview > .tiny {
+  flex: none;
+}
+.document-chunks {
+  overflow: auto;
+  flex: 1;
+  min-height: 80px;
+  margin: 22px 0;
+}
+.document-chunks article {
+  padding: 18px 13px;
+  border-bottom: 1px solid var(--cb-border);
+}
+.document-chunks .eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+.document-chunks article p {
+  font-size: 12px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+.document-preview > .secondary {
+  align-self: flex-start;
+  flex: none;
+  font-size: 12px;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  justify-content: center;
+}
+.source-quote {
+  background: var(--cb-accent-soft);
+  border-left: 3px solid #b6a1d4;
+  padding: 12px 15px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--cb-soft);
+  margin: 15px 0 0;
+  border-radius: 3px;
+  flex: none;
+  max-height: 160px;
+  overflow: auto;
+}
+@media (max-width: 1200px) {
+  .document-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 680px) {
+  .upload-zone {
+    padding: 23px 15px;
+    min-height: 200px;
+    border-color: hsl(var(--input));
+  }
+  .upload-zone h3 {
+    font-size: 14px;
+  }
+  .upload-mode {
+    flex-direction: column;
+    gap: 9px;
+    font-size: 12px;
+    margin-top: 18px;
+  }
+  .upload-mode select {
+    font-size: 12px;
+    max-width: 100%;
+  }
+  .document-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .document-card {
+    padding: 18px;
+    border-radius: var(--radius);
+  }
+  .document-card > div:first-child {
+    margin-bottom: 11px;
+  }
+  .document-card h3 {
+    font-size: 13px;
+  }
+  .document-card > .tiny {
+    font-size: 12px;
+    margin-bottom: 12px;
+  }
+  .document-open {
+    font-size: 12px;
+  }
+  .document-preview {
+    padding: 20px;
+    max-height: calc(100dvh - 30px);
+  }
+  .document-preview h2 {
+    font-size: 15px;
+  }
+  .document-chunks {
+    margin: 15px 0;
+  }
+  .source-quote {
+    font-size: 12px;
+  }
+}

@@ -10,6 +10,9 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import { Input } from "./ui/input";
 import { request } from "../lib/api";
 import type { Document, Mode } from "../lib/types";
 export function Library({
@@ -73,24 +76,20 @@ export function Library({
       <div className="page-width">
         <div className="page-heading">
           <div>
-            <span className="eyebrow">YOUR REFERENCE SHELF</span>
+            <span className="eyebrow">知识来源</span>
             <h1>资料库</h1>
             <p>把课程讲义变成可追溯、可提问的知识来源。</p>
           </div>
-          <button
-            className="primary"
-            onClick={() => input.current?.click()}
-            disabled={busy}
-          >
+          <Button onClick={() => input.current?.click()} disabled={busy}>
             <Upload size={17} />
             {busy ? "上传中…" : "上传资料"}
-          </button>
+          </Button>
         </div>
         <input
           ref={input}
           type="file"
           accept=".pdf,.pptx,.docx"
-          className="sr-only"
+          hidden
           onChange={(e) => void upload(e.target.files?.[0])}
         />
         <section
@@ -133,7 +132,7 @@ export function Library({
           </h2>
           <label className="search-field">
             <Search size={16} />
-            <input
+            <Input
               aria-label="搜索资料"
               placeholder="按名称搜索…"
               value={query}
@@ -155,7 +154,7 @@ export function Library({
                   .includes(query.toLowerCase()),
               )
               .map((d) => (
-                <article className="document-card" key={d.id}>
+                <Card className="document-card" key={d.id}>
                   <div>
                     <span className="file-type">
                       <FileText size={23} />
@@ -226,7 +225,7 @@ export function Library({
                     查看来源
                     <ExternalLink size={13} />
                   </button>
-                </article>
+                </Card>
               ))}
           </div>
         ) : (

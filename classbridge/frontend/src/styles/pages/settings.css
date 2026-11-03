@@ -1,0 +1,287 @@
+/* ClassBridge / Minomeet MIT styles, migrated by responsibility. */
+.settings-width {
+  max-width: 1060px;
+  padding: 28px 32px;
+  margin: auto;
+}
+.settings-card {
+  background: var(--cb-panel);
+  border: 1px solid var(--cb-border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-top: 20px;
+}
+.settings-title {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 20px;
+}
+.settings-title h2 {
+  font-size: 15px;
+  margin-bottom: 5px;
+}
+.settings-title p {
+  font-size: 12px;
+  color: var(--cb-muted);
+}
+.settings-title .quick-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 17px 0;
+  border-bottom: 1px solid var(--cb-border);
+}
+.settings-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.settings-row strong {
+  font-size: 12px;
+  display: block;
+}
+.settings-row small {
+  font-size: 12px;
+  color: var(--cb-muted);
+  display: block;
+  margin-top: 6px;
+  line-height: 1.8;
+}
+.theme-choice {
+  min-width: 166px;
+}
+.theme-choice > button {
+  font-size: 12px;
+  padding: 7px 12px;
+}
+.range-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--cb-muted);
+}
+.range-control input {
+  width: 135px;
+  padding: 0;
+  accent-color: #a68acb;
+  box-shadow: none;
+}
+.subtitle-preview {
+  background: var(--cb-page);
+  border-radius: 8px;
+  padding: 18px 20px;
+  margin: 17px 0 0;
+}
+.subtitle-preview small {
+  color: var(--cb-muted);
+  font-size: 12px;
+}
+.subtitle-preview p {
+  line-height: 1.6;
+  color: var(--cb-soft);
+  margin-top: 8px;
+}
+.terms-label {
+  font-size: 12px;
+  display: block;
+  margin-top: 20px;
+}
+.terms-label small {
+  display: block;
+  font-size: 12px;
+  color: var(--cb-muted);
+  margin: 7px 0 12px;
+  line-height: 1.8;
+}
+.terms-label textarea {
+  width: 100%;
+  font-size: 12px;
+  line-height: 1.9;
+}
+.settings-row .switch {
+  appearance: none;
+  width: 35px;
+  height: 20px;
+  padding: 0;
+  border-radius: 12px;
+  background: #dcd9e5;
+  position: relative;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.settings-row .switch:before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  background: white;
+  border-radius: 50%;
+  width: 14px;
+  height: 14px;
+  box-shadow: 0 1px 3px #0001;
+  transition: transform 0.2s;
+}
+.settings-row .switch:checked {
+  background: hsl(var(--primary));
+}
+.settings-row .switch:checked:before {
+  transform: translateX(15px);
+}
+.model-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+.model-status .tiny {
+  font-size: 12px;
+}
+.model-table {
+  border-top: 1px solid var(--cb-border);
+}
+.model-table > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--cb-border);
+  font-size: 12px;
+  color: var(--cb-soft);
+}
+.model-table code {
+  font-size: 12px;
+  color: var(--cb-muted);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.config-checks {
+  display: flex;
+  gap: 20px;
+  font-size: 12px;
+  color: var(--cb-soft);
+  margin: 17px 0 12px;
+}
+.settings-card > .tiny {
+  font-size: 12px;
+  line-height: 1.9;
+}
+.settings .page-heading .primary {
+  font-size: 12px;
+}
+.settings .info-box {
+  font-size: 12px;
+}
+.settings-card .info-box {
+  margin-top: 18px;
+}
+@media (max-width: 1024px) {
+  .settings-width {
+    padding: 28px 32px;
+    max-width: 1060px;
+  }
+}
+@media (max-width: 1100px) and (min-width: 681px) {
+  .settings-width {
+    padding: 28px 32px;
+    max-width: 1060px;
+  }
+}
+@media (max-width: 680px) {
+  .settings-width {
+    padding: 28px 32px;
+    max-width: 1060px;
+  }
+  .settings .page-heading .primary {
+    font-size: 12px;
+    padding: 10px 12px;
+    min-height: 38px;
+    gap: 6px;
+  }
+  .settings .page-heading .primary > svg {
+    width: 14px;
+  }
+  .settings-card {
+    padding: 24px;
+    margin-top: 20px;
+    border-radius: var(--radius);
+  }
+  .settings-title {
+    gap: 11px;
+    margin-bottom: 14px;
+  }
+  .settings-title h2 {
+    font-size: 14px;
+  }
+  .settings-title p {
+    font-size: 12px;
+  }
+  .settings-title .quick-icon {
+    width: 35px;
+    height: 35px;
+  }
+  .settings-row {
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: 16px 0;
+  }
+  .settings-row strong {
+    font-size: 12px;
+  }
+  .settings-row small {
+    font-size: 12px;
+  }
+  .theme-choice {
+    min-width: 145px;
+  }
+  .theme-choice > button {
+    font-size: 12px;
+    padding: 7px 10px;
+  }
+  .range-control {
+    margin-left: auto;
+  }
+  .range-control input {
+    width: 130px;
+  }
+  .subtitle-preview {
+    padding: 17px 15px;
+  }
+  .subtitle-preview small {
+    font-size: 12px;
+  }
+  .subtitle-preview p {
+    font-size: 22px;
+  }
+  .settings-row .switch {
+    margin-left: auto;
+  }
+  .model-table > div {
+    font-size: 12px;
+    align-items: flex-start;
+  }
+  .model-table code {
+    font-size: 12px;
+    max-width: 66%;
+  }
+  .settings-card > .tiny {
+    font-size: 12px;
+  }
+  .settings .info-box {
+    font-size: 12px;
+    padding: 12px;
+  }
+  .terms-label textarea {
+    font-size: 12px;
+  }
+}

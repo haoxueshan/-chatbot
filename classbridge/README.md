@@ -98,6 +98,8 @@ Pop-Location
 
 ## 前端来源与许可
 
+前端现代化第一阶段的组件、依赖、兼容性、45 项测试及实际浏览器响应式截图见 [FRONTEND_PHASE1_REDESIGN.md](docs/FRONTEND_PHASE1_REDESIGN.md)。手机与 iPad 截图为浏览器指定视口验收，不代表实体 Safari 已验证。
+
 实际读取并采用 [Minomeet](https://github.com/shareefmx/minomeet) commit `2cfd93d6dc098fe0aa7c7f92cc8f4ce55fb0975b`。复用其 React/Vite/TypeScript/Tailwind 构建基础、依赖组合及CSS基础，沿用侧栏/卡片/录音/笔记/设置的信息结构；涉及原业务状态、录音和模型配置的页面实现已重写。没有声称原页面组件未经修改直接复用。详见 [FRONTEND_REUSE.md](docs/FRONTEND_REUSE.md)。
 
 Minomeet MIT 版权声明保留在 `vendor/MINOMEET_LICENSE`、`frontend/LICENSE.minomeet` 与根 `LICENSE`。没有引入 assistant-ui：本版聊天较小，自定义后端与一套聊天状态足够，不依赖托管订阅。第三方依赖各自遵循其许可证。

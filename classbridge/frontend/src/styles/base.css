@@ -1,0 +1,171 @@
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--cb-page);
+  color: var(--cb-text);
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+svg {
+  flex-shrink: 0;
+}
+::selection {
+  background: var(--cb-accent-soft);
+  color: var(--cb-text);
+}
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 8px;
+}
+/* ClassBridge / Minomeet MIT styles, migrated by responsibility. */
+* {
+  box-sizing: border-box;
+}
+body {
+  font-family:
+    Inter,
+    "Segoe UI",
+    "Microsoft YaHei",
+    "Apple SD Gothic Neo",
+    "Malgun Gothic",
+    "Noto Sans KR",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
+  color: var(--cb-text);
+  font-size: 14px;
+}
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 0;
+  background: none;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition:
+    background 0.15s,
+    border 0.15s,
+    opacity 0.15s;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+}
+input,
+textarea,
+select {
+  font: inherit;
+  outline: none;
+  color: var(--cb-text);
+  background: var(--cb-panel);
+  border: 1px solid var(--cb-border);
+  border-radius: 9px;
+  padding: 11px 13px;
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.16);
+}
+input[type="checkbox"] {
+  accent-color: #6355d9;
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+textarea {
+  resize: vertical;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+h1 {
+  font-size: 28px;
+  letter-spacing: -0.7px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+h2 {
+  font-size: 19px;
+  letter-spacing: -0.3px;
+  font-weight: 650;
+}
+h3 {
+  font-size: 15px;
+  font-weight: 650;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 650;
+}
+p {
+  line-height: 1.8;
+}
+small {
+  font-size: 12px;
+}
+strong {
+  font-weight: 650;
+}
+.muted {
+  color: var(--cb-muted);
+}
+.tiny {
+  font-size: 12px;
+}
+.full {
+  width: 100%;
+}
+@keyframes cb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 680px) {
+  h1 {
+    font-size: 24px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none;
+    transition: none;
+    scroll-behavior: auto;
+  }
+}

@@ -1,0 +1,225 @@
+.dashboard-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.dashboard-action {
+  border: 1px solid var(--cb-border);
+  background: var(--cb-panel);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: left;
+  justify-content: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+.dashboard-action:hover {
+  border-color: hsl(var(--ring));
+  background: var(--cb-accent-soft);
+}
+.dashboard-action strong {
+  display: block;
+  font-size: 14px;
+}
+.dashboard-action small {
+  display: block;
+  color: var(--cb-muted);
+  margin-top: 5px;
+  line-height: 1.7;
+}
+.dashboard-action > svg {
+  margin-left: auto;
+  flex: none;
+  color: var(--cb-muted);
+}
+.dashboard-action .quick-icon {
+  width: 40px;
+  height: 40px;
+}
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+.stat-card {
+  padding: 20px 24px;
+}
+.stat-card > span {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--cb-muted);
+  font-size: 13px;
+}
+.stat-card strong {
+  display: block;
+  font-size: 30px;
+  line-height: 1.5;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  margin: 12px 0 4px;
+}
+.stat-card strong small {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--cb-muted);
+}
+.stat-card p {
+  font-size: 12px;
+  color: var(--cb-muted);
+}
+.session-list {
+  background: var(--cb-panel);
+  border: 1px solid var(--cb-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.session-columns {
+  display: grid;
+  grid-template-columns: 1fr 100px 96px;
+  gap: 16px;
+  padding: 12px 48px 12px 24px;
+  color: var(--cb-muted);
+  font-size: 12px;
+  background: hsl(var(--muted) / 0.55);
+}
+.session-row {
+  display: flex;
+  width: 100%;
+  padding: 18px 24px;
+  text-align: left;
+  gap: 16px;
+  border-top: 1px solid var(--cb-border);
+}
+.session-row:hover {
+  background: hsl(var(--muted) / 0.6);
+}
+.session-symbol {
+  width: 40px;
+  height: 40px;
+  background: hsl(var(--muted));
+  color: var(--cb-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 8px;
+}
+.session-title {
+  flex: 1;
+  min-width: 0;
+}
+.session-title strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.session-title small {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  font-size: 12px;
+  color: var(--cb-muted);
+}
+.session-row .badge {
+  width: 100px;
+  justify-content: center;
+}
+.row-state {
+  width: 96px;
+  flex: none;
+  font-size: 12px;
+  color: var(--cb-muted);
+}
+.session-row > svg {
+  color: var(--cb-muted);
+  flex: none;
+}
+.dashboard-links {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+@media (max-width: 1200px) {
+  .dashboard-action {
+    padding: 16px;
+    gap: 10px;
+  }
+  .dashboard-action > svg {
+    display: none;
+  }
+  .session-columns {
+    grid-template-columns: 1fr 84px 64px;
+  }
+  .row-state {
+    width: 64px;
+  }
+  .session-row .badge {
+    width: 84px;
+  }
+}
+@media (max-width: 600px) {
+  .dashboard-actions {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .dashboard-action > svg {
+    display: block;
+  }
+  .stat-grid {
+    gap: 8px;
+  }
+  .stat-card {
+    padding: 14px 10px;
+  }
+  .stat-card > span {
+    font-size: 12px;
+  }
+  .stat-card > span svg {
+    display: none;
+  }
+  .stat-card strong {
+    font-size: 26px;
+  }
+  .stat-card p {
+    font-size: 11px;
+  }
+  .session-columns {
+    display: none;
+  }
+  .session-row {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 16px;
+  }
+  .session-row:first-child {
+    border-top: 0;
+  }
+  .session-title {
+    flex-basis: calc(100% - 50px);
+  }
+  .session-title strong {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .session-row .badge {
+    margin-left: 50px;
+    width: auto;
+  }
+  .session-row > svg {
+    margin-left: auto;
+  }
+  .row-state {
+    width: auto;
+  }
+  .dashboard-links {
+    gap: 8px;
+  }
+}

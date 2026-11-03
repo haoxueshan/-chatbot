@@ -3,7 +3,6 @@ import {
   ArrowRight,
   AudioLines,
   BookOpen,
-  CalendarDays,
   ChevronRight,
   Clock,
   FileText,
@@ -16,9 +15,17 @@ import {
   Sparkles,
   Users,
   X,
+  Settings2,
+  Upload,
 } from "lucide-react";
 import { formatDate, formatTime } from "../lib/api";
 import type { Mode, Session } from "../lib/types";
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
+import { Input } from "./ui/input";
+import { Badge } from "./ui/badge";
+import { Dialog } from "./ui/dialog";
+
 export function Home({
   sessions,
   search,
@@ -26,253 +33,229 @@ export function Home({
   create,
   select,
   library,
+  settings,
 }: {
   sessions: Session[];
   search: string;
-  setSearch: (v: string) => void;
+  setSearch: (value: string) => void;
   create: (kind?: string) => void;
-  select: (s: Session) => void;
+  select: (session: Session) => void;
   library: () => void;
+  settings: () => void;
 }) {
-  const total = sessions.reduce((v, s) => v + (s.captured_ms ?? s.duration_ms ?? 0), 0);
+  const total = sessions.reduce(
+    (value, session) =>
+      value + (session.captured_ms ?? session.duration_ms ?? 0),
+    0,
+  );
+  const realCount = sessions.filter(
+    (session) => session.mode === "real",
+  ).length;
   return (
     <div className="home page-scroll">
       <div className="page-width">
         <div className="page-heading">
           <div>
-            <span className="eyebrow">YOUR LEARNING, CONNECTED</span>
-            <h1>让每一刻理解，留下来。</h1>
-            <p>把课堂、会议与对话，连接成属于你的知识。</p>
+            <span className="eyebrow">工作台</span>
+            <h1>欢迎回来</h1>
+            <p>开始一段记录，或继续整理你的课堂与会议。</p>
           </div>
-          <span className="date-label">
-            <CalendarDays size={16} />
-            {new Date().toLocaleDateString("zh-CN", {
-              month: "long",
-              day: "numeric",
-              weekday: "long",
-            })}
-          </span>
+          <Button variant="secondary" onClick={library}>
+            <Upload size={17} />
+            导入资料
+          </Button>
         </div>
-        <section className="hero">
-          <div className="hero-content">
-            <span className="hero-pill">
-              <span />
-              韩语 · 英语 → 简体中文
-            </span>
-            <h2>
-              专注听讲，
-              <br />
-              剩下的交给 ClassBridge。
-            </h2>
-            <p>
-              实时双语字幕、阶段重点与有来源的 AI 问答，
-              <br className="desktop-break" />
-              让跨语言学习更从容。
-            </p>
-            <button className="hero-button" onClick={() => create("classroom")}>
-              <Mic size={18} />
-              开始一节新课堂
-              <ArrowRight size={17} />
-            </button>
-            <small>
-              <ShieldCheck size={13} />
-              默认只保存文字 · 音频保留由你决定
-            </small>
-          </div>
-          <div className="hero-art" aria-hidden="true">
-            <div className="orb orb-one" />
-            <div className="orb orb-two" />
-            <div className="illustration-label">
-              <AudioLines size={18} />
-              从声音，到知识
-            </div>
-            <div className="illustration-card">
-              <div className="mini-card-head">
-                <span>CLASSBRIDGE</span>
-                <span>字幕示意</span>
-              </div>
-              <div className="wave-decoration">
-                {[
-                  14, 27, 20, 39, 52, 32, 64, 42, 28, 49, 35, 20, 32, 17, 26,
-                  12,
-                ].map((n, i) => (
-                  <i key={i} style={{ height: n }} />
-                ))}
-              </div>
-              <div className="illustration-divider" />
-              <span className="tiny">이제 함께 배워봅시다.</span>
-              <strong>现在，让我们一起学习。</strong>
-              <div className="mini-footer">
-                <span>原文 + 中文</span>
-                <span>
-                  <Sparkles size={12} />
-                  清晰理解
-                </span>
-              </div>
-            </div>
-            <div className="floating-note">
-              <BookOpen size={17} />
-              <span>每个知识点，都有出处</span>
-            </div>
-          </div>
-        </section>
-        <section className="quick-grid" aria-label="创建会话类型">
+        <section className="dashboard-actions" aria-label="创建会话类型">
           {[
             {
               kind: "classroom",
               icon: GraduationCap,
-              title: "课堂",
-              text: "跟上讲授节奏，梳理知识脉络",
-              color: "purple",
+              title: "新建课堂录音",
+              text: "双语字幕与课堂重点",
             },
             {
               kind: "meeting",
               icon: Users,
-              title: "会议",
-              text: "捕捉讨论重点，明确下一步",
-              color: "blue",
+              title: "新建会议记录",
+              text: "讨论内容与行动事项",
             },
             {
               kind: "interview",
               icon: MessagesSquare,
-              title: "访谈",
-              text: "保留真实表达，发现关键洞察",
-              color: "orange",
+              title: "新建访谈",
+              text: "保留原话与对话线索",
             },
-          ].map(({ kind, icon: Icon, title, text, color }) => (
+          ].map(({ kind, icon: Icon, title, text }) => (
             <button
+              className="dashboard-action"
               key={kind}
-              className="quick-card"
               onClick={() => create(kind)}
             >
-              <span className={`quick-icon ${color}`}>
-                <Icon size={23} />
+              <span className="quick-icon">
+                <Icon size={22} />
               </span>
               <span>
-                <strong>新建{title}</strong>
+                <strong>{title}</strong>
                 <small>{text}</small>
               </span>
-              <ChevronRight size={17} />
+              <Plus size={17} />
             </button>
           ))}
         </section>
-        <section className="recent-section">
+        <section className="stat-grid" aria-label="会话统计">
+          <Card className="stat-card">
+            <span>
+              <FileText size={16} />
+              {search ? "匹配会话" : "已加载会话"}
+            </span>
+            <strong>
+              {sessions.length}
+              <small> 个</small>
+            </strong>
+            <p>来自当前会话列表</p>
+          </Card>
+          <Card className="stat-card">
+            <span>
+              <Clock size={16} />
+              累计采音时长
+            </span>
+            <strong>
+              {Math.floor(total / 60000)}
+              <small> 分钟</small>
+            </strong>
+            <p>{search ? "当前搜索结果" : "当前列表"} · 不含暂停间隔</p>
+          </Card>
+          <Card className="stat-card">
+            <span>
+              <Mic size={16} />
+              真实模式会话
+            </span>
+            <strong>
+              {realCount}
+              <small> 个</small>
+            </strong>
+            <p>另有 {sessions.length - realCount} 个模拟演示</p>
+          </Card>
+        </section>
+        <section className="recent-section" aria-label="历史会话">
           <div className="section-heading">
             <div>
               <h2>
                 最近会话 <span className="count-pill">{sessions.length}</span>
               </h2>
-              <p>所有已保存的理解，都可以再次连接。</p>
+              <p>打开已保存的字幕、摘要与资料。</p>
             </div>
             <label className="search-field">
               <Search size={17} />
-              <input
+              <Input
                 aria-label="搜索会话与字幕"
                 placeholder="搜索会话与字幕…"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(event) => setSearch(event.target.value)}
               />
               {search && (
-                <button aria-label="清除搜索" onClick={() => setSearch("")}>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label="清除搜索"
+                  onClick={() => setSearch("")}
+                >
                   <X size={14} />
-                </button>
+                </Button>
               )}
             </label>
           </div>
           {sessions.length ? (
             <div className="session-list">
-              {sessions.map((s) => (
+              <div className="session-columns" aria-hidden="true">
+                <span>会话名称 / 类型</span>
+                <span>模式</span>
+                <span>状态</span>
+              </div>
+              {sessions.map((session) => (
                 <button
                   className="session-row"
-                  key={s.id}
-                  onClick={() => select(s)}
+                  key={session.id}
+                  onClick={() => select(session)}
                 >
-                  <span
-                    className={`session-symbol ${s.kind === "meeting" ? "blue" : "purple"}`}
-                  >
-                    {s.kind === "meeting" ? (
+                  <span className="session-symbol">
+                    {session.kind === "meeting" ? (
                       <Users size={20} />
-                    ) : s.kind === "interview" ? (
+                    ) : session.kind === "interview" ? (
                       <MessagesSquare size={20} />
                     ) : (
                       <GraduationCap size={20} />
                     )}
                   </span>
                   <span className="session-title">
-                    <strong>{s.title}</strong>
+                    <strong>{session.title}</strong>
                     <small>
-                      {formatDate(s.created_at)}
+                      {formatDate(session.created_at)}
                       <span>·</span>
                       <Clock size={12} />
-                      {formatTime(s.captured_ms ?? s.duration_ms)}
+                      {formatTime(session.captured_ms ?? session.duration_ms)}
                       <span>·</span>
-                      {s.kind === "meeting"
+                      {session.kind === "meeting"
                         ? "会议"
-                        : s.kind === "interview"
+                        : session.kind === "interview"
                           ? "访谈"
                           : "课堂"}
                     </small>
                   </span>
-                  <span
-                    className={`badge ${s.mode === "demo" ? "amber" : "green"}`}
-                  >
-                    {s.mode === "demo" ? "模拟演示" : "真实会话"}
-                  </span>
+                  <Badge className={session.mode === "demo" ? "amber" : "blue"}>
+                    {session.mode === "demo" ? "模拟演示" : "真实模式"}
+                  </Badge>
                   <span className="row-state">
-                    {s.status === "recording" ? "录音中" : "已保存"}
+                    {(
+                      {
+                        recording: "录音中",
+                        stopped: "已停止",
+                        idle: "待开始",
+                        completed: "已完成",
+                        processing: "处理中",
+                        failed: "处理失败",
+                      } as Record<string, string>
+                    )[session.status] || session.status}
                   </span>
-                  <ChevronRight size={17} />
+                  <ChevronRight size={16} />
                 </button>
               ))}
             </div>
           ) : (
-            <div className="empty-state">
-              <span className="empty-icon">
-                <FileText size={28} />
-              </span>
-              <h3>
-                {search ? "未找到相关会话" : "你的第一份课堂笔记，即将诞生"}
-              </h3>
+            <Card className="empty-state">
+              <FileText size={28} />
+              <h3>{search ? "未找到相关会话" : "还没有会话"}</h3>
               <p>
                 {search
                   ? "试试其他标题或字幕关键词。"
-                  : "创建一个模拟会话，体验双语字幕与知识问答。"}
+                  : "从模拟演示开始体验，不调用付费 API。"}
               </p>
               {!search && (
-                <button className="secondary" onClick={() => create()}>
+                <Button onClick={() => create()}>
                   <Plus size={16} />
-                  创建模拟会话
-                </button>
+                  创建会话
+                </Button>
               )}
-            </div>
+            </Card>
           )}
         </section>
-        <div className="home-bottom">
-          <div>
-            <BookOpen size={20} />
-            <span>
-              <strong>让讲义也参与理解</strong>
-              <small>上传 PDF、PPTX 或 DOCX，让问答有据可依。</small>
-            </span>
-            <button className="text-button" onClick={library}>
-              打开资料库
-              <ArrowRight size={15} />
-            </button>
-          </div>
-          <div>
-            <Clock size={20} />
-            <span>
-              <strong>{Math.round(total / 60000)} 分钟</strong>
-              <small>已保存的会话时长</small>
-            </span>
-          </div>
+        <div className="dashboard-links">
+          <Button variant="secondary" onClick={library}>
+            <BookOpen size={16} />
+            资料库与知识来源
+            <ArrowRight size={15} />
+          </Button>
+          <Button variant="ghost" onClick={settings}>
+            <Settings2 size={16} />
+            语言、麦克风与阅读偏好
+          </Button>
         </div>
         <footer className="page-footer">
           <span>
-            <ShieldCheck size={13} />
-            私人工作空间 · 音频与资料默认私有
+            <ShieldCheck size={14} />
+            私人工作空间 · 默认只保存文字
           </span>
-          <span>ClassBridge，让理解发生。</span>
+          <span>ClassBridge</span>
         </footer>
       </div>
     </div>
@@ -303,48 +286,49 @@ export function NewSession({
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !busy) close();
-      }}
+    <Dialog
+      title="新建会话"
+      description="选择会话类型、模式和音频保留策略"
+      close={close}
+      busy={busy}
     >
-      <section
-        className="modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="new-title"
-      >
-        <div className="modal-title">
-          <span className="quick-icon purple">
-            <AudioLines size={23} />
-          </span>
-          <button className="icon-button" aria-label="关闭" onClick={close}>
-            <X size={20} />
-          </button>
-        </div>
-        <h2 id="new-title">开始新的理解</h2>
-        <p className="muted">先选择会话模式，准备好后再点击开始。</p>
-        <form
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setBusy(true);
-            setError("");
-            try {
-              await submit({
-                title:
-                  title.trim() ||
-                  `${kind === "meeting" ? "会议" : kind === "interview" ? "访谈" : "课堂"} · ${new Date().toLocaleDateString("zh-CN")}`,
-                kind,
-                mode,
-                retain_audio: retain,
-              });
-            } catch (err) {
-              setError(err instanceof Error ? err.message : "创建失败");
-              setBusy(false);
-            }
-          }}
+      <div className="modal-title">
+        <span className="quick-icon purple">
+          <AudioLines size={23} />
+        </span>
+        <button
+          className="icon-button"
+          aria-label="关闭"
+          disabled={busy}
+          onClick={close}
         >
+          <X size={20} />
+        </button>
+      </div>
+      <h2 aria-hidden="true">新建会话</h2>
+      <p className="muted">先选择会话模式，准备好后再点击开始。</p>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (busy) return;
+          setBusy(true);
+          setError("");
+          try {
+            await submit({
+              title:
+                title.trim() ||
+                `${kind === "meeting" ? "会议" : kind === "interview" ? "访谈" : "课堂"} · ${new Date().toLocaleDateString("zh-CN")}`,
+              kind,
+              mode,
+              retain_audio: retain,
+            });
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "创建失败");
+            setBusy(false);
+          }
+        }}
+      >
+        <fieldset disabled={busy} className="new-session-fields">
           <div className="segmented">
             {[
               ["classroom", "课堂"],
@@ -363,7 +347,7 @@ export function NewSession({
           </div>
           <label>
             会话名称
-            <input
+            <Input
               autoFocus
               maxLength={160}
               value={title}
@@ -415,17 +399,17 @@ export function NewSession({
               </small>
             </span>
           </label>
-          {error && (
-            <div className="error-box" role="alert">
-              {error}
-            </div>
-          )}
-          <button className="primary full" disabled={busy}>
-            {busy ? "正在创建…" : "创建会话"}
-            <ArrowRight size={17} />
-          </button>
-        </form>
-      </section>
-    </div>
+        </fieldset>
+        {error && (
+          <div className="error-box" role="alert">
+            {error}
+          </div>
+        )}
+        <Button type="submit" className="full" disabled={busy}>
+          {busy ? "正在创建…" : "创建会话"}
+          <ArrowRight size={17} />
+        </Button>
+      </form>
+    </Dialog>
   );
 }

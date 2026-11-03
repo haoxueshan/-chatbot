@@ -564,6 +564,9 @@ export function SessionView({
           </div>
           <div
             className="subtitle-list"
+            role="region"
+            aria-label="双语字幕记录"
+            tabIndex={0}
             ref={list}
             onScroll={() => {
               const el = list.current;
@@ -776,7 +779,9 @@ export function SessionView({
         </aside>
       </div>
       {session.mode === "real" && (
-        <div className="info-box" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+        <details className="microphone-options">
+          <summary>麦克风与拾音设置 · {live.asrAcousticProfile === "near" ? "本次近场" : live.asrAcousticProfile === "far" ? "本次远场" : "等待识别场景确认"}</summary>
+          <div className="microphone-controls">
           <label htmlFor="classbridge-microphone">麦克风：</label>
           <select id="classbridge-microphone" aria-label="录音麦克风"
             disabled={live.active || live.settling}
@@ -798,9 +803,10 @@ export function SessionView({
           {live.appliedAudio && <span className="tiny muted">浏览器实际报告：{([['echoCancellation','回声消除'],['noiseSuppression','降噪'],['autoGainControl','自动增益']] as const).map(([key,label])=>`${label}${live.appliedAudio?.[key]===undefined?'未报告':live.appliedAudio[key]?'开':'关'}`).join(' · ')}（硬件处理未知）</span>}
           {live.active && live.audioQuality && <span className="tiny muted">峰值 {live.inputPeak.toFixed(2)} / {Math.round(live.audioQuality.peak_window_ms)}ms窗口 · 电平不是识别置信度</span>}
           {live.active && live.audioQuality?.possible_clipping && <strong role="status">输入连续接近满幅，可能削波；请检查设备增益</strong>}
-        </div>
+          </div>
+        </details>
       )}
-      <div className="capture-bar">
+      <div className="capture-bar" aria-label="录音控制">
         <div className="capture-left">
           <span
             className={`connection-dot ${live.connection === "已连接" ? "connected" : ""}`}

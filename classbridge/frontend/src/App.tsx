@@ -1,13 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  BookOpen,
-  Home as HomeIcon,
-  LoaderCircle,
-  Settings as SettingsIcon,
-  WifiOff,
-} from "lucide-react";
+import { LoaderCircle, WifiOff } from "lucide-react";
 import { Login } from "./components/Login";
-import { Sidebar, Titlebar, Toast } from "./components/Shell";
+import { ResponsiveSidebar, Titlebar, Toast } from "./components/Shell";
 import { Home, NewSession } from "./components/Home";
 import { SessionView } from "./components/SessionView";
 import { Library } from "./components/Library";
@@ -36,12 +30,16 @@ export default function App() {
     [newKind, setNewKind] = useState<string | null>(null),
     [active, setActive] = useState(false),
     [loading, setLoading] = useState(false),
+    [navigationOpen, setNavigationOpen] = useState(false),
+    [collapsed, setCollapsed] = useState(false),
     [online, setOnline] = useState(navigator.onLine);
   const current = useRef<Session | null>(session);
   current.current = session;
   const activeRef = useRef(active);
   activeRef.current = active;
   const routeRef = useRef(false);
+  // UI navigation may overlap HTTP reads; only the latest route owns the view.
+  const navigationVersion = useRef(0);
   const notify = useCallback((message: string) => setToast(message), []);
   const loadSessions = useCallback(
     async (q = "") => {
@@ -61,16 +59,20 @@ export default function App() {
   const openSession = useCallback(
     async (id: string) => {
       if (activeRef.current && id !== current.current?.id) return;
+      const version = ++navigationVersion.current;
       setLoading(true);
       try {
         const value = await request<Session>(`/sessions/${id}`);
+        if (version !== navigationVersion.current) return;
+        if (activeRef.current && id !== current.current?.id) return;
         setSession(value);
         setPage("session");
         location.hash = `session/${id}`;
       } catch (e) {
+        if (version !== navigationVersion.current) return;
         notify(e instanceof Error ? e.message : "会话不存在");
       } finally {
-        setLoading(false);
+        if (version === navigationVersion.current) setLoading(false);
       }
     },
     [notify],
@@ -87,6 +89,8 @@ export default function App() {
   const navigate = useCallback(
     (target: Page) => {
       if (activeRef.current) return;
+      navigationVersion.current++;
+      setLoading(false);
       setPage(target);
       location.hash = target;
       if (target === "home") void loadSessions();
@@ -145,13 +149,21 @@ export default function App() {
   }, []);
   useEffect(() => {
     const handle = () => {
-      if (activeRef.current) return;
+      if (activeRef.current) {
+        if (current.current)
+          history.replaceState(null, "", `#session/${current.current.id}`);
+        return;
+      }
       const hash = location.hash.slice(1);
       if (hash.startsWith("session/")) {
         if (current.current?.id !== hash.slice(8))
           void openSession(hash.slice(8));
-      } else if (["home", "settings", "library"].includes(hash))
+        else setPage("session");
+      } else if (["home", "settings", "library"].includes(hash)) {
+        navigationVersion.current++;
+        setLoading(false);
         setPage(hash as Page);
+      }
     };
     window.addEventListener("hashchange", handle);
     return () => window.removeEventListener("hashchange", handle);
@@ -178,8 +190,10 @@ export default function App() {
     await openSession(result.id);
   };
   const logout = async () => {
+    if (activeRef.current) return;
     try {
       await post("/auth/logout");
+      navigationVersion.current++;
       setUser(null);
       setSession(null);
       setSessions([]);
@@ -205,7 +219,10 @@ export default function App() {
     );
   return (
     <div className="app-shell">
-      <Sidebar
+      <ResponsiveSidebar
+        open={navigationOpen}
+        setOpen={setNavigationOpen}
+        collapsed={collapsed}
         page={page}
         sessions={sessions}
         activeId={session?.id}
@@ -216,6 +233,12 @@ export default function App() {
       />
       <div className="main-shell">
         <Titlebar
+          online={online}
+          username={user.username}
+          menu={() => setNavigationOpen(true)}
+          menuOpen={navigationOpen}
+          collapse={() => setCollapsed(!collapsed)}
+          collapsed={collapsed}
           title={
             page === "home"
               ? "工作台"
@@ -261,6 +284,7 @@ export default function App() {
               create={(kind) => setNewKind(kind || "classroom")}
               select={(s) => void openSession(s.id)}
               library={() => navigate("library")}
+              settings={() => navigate("settings")}
             />
           )}{" "}
           {page === "session" && session && (
@@ -284,23 +308,6 @@ export default function App() {
             <Settings preferences={preferences} save={savePreferences} />
           )}
         </main>
-        <nav className="mobile-navigation" aria-label="移动端导航">
-          {[
-            { id: "home" as Page, label: "工作台", icon: HomeIcon },
-            { id: "library" as Page, label: "资料库", icon: BookOpen },
-            { id: "settings" as Page, label: "设置", icon: SettingsIcon },
-          ].map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              className={page === id ? "active" : ""}
-              disabled={active}
-              onClick={() => navigate(id)}
-            >
-              <Icon size={19} />
-              {label}
-            </button>
-          ))}
-        </nav>
       </div>
       {newKind && (
         <NewSession
