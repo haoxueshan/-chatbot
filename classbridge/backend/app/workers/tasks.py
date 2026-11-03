@@ -4,10 +4,10 @@ import contextlib
 import logging
 from datetime import datetime, timedelta, timezone
 from celery import Celery
-from sqlalchemy import select
+from sqlalchemy import select, case, and_, or_
 from app.config import settings
 from app.db import SessionLocal
-from app.models import ProcessingTask, Outbox, Session, SegmentRevision, AudioAsset, RecognitionStream, User, now
+from app.models import ProcessingTask, Outbox, Session, SegmentRevision, Translation, AudioAsset, RecognitionStream, User, now
 from app.services.events import emit, save_translation, save_final, enqueue, latest_segments
 from app.services.translation_timing import TranslationTiming, wall_queue_ms
 
@@ -16,7 +16,8 @@ celery_app=Celery('classbridge',broker=settings.redis_url,backend=settings.redis
 celery_app.conf.update(task_serializer='json',accept_content=['json'],result_serializer='json',
     task_acks_late=True,worker_prefetch_multiplier=1,task_reject_on_worker_lost=True,
     task_soft_time_limit=720,task_time_limit=750,broker_connection_retry_on_startup=True,
-    beat_schedule={'outbox':{'task':'classbridge.dispatch','schedule':3.0},'expire-audio':{'task':'classbridge.expire_audio','schedule':3600.0},
+    broker_transport_options={'queue_order_strategy':'priority','priority_steps':[0,3,6,9]},
+    beat_schedule={'outbox':{'task':'classbridge.dispatch','schedule':.5 if settings.incremental_translation_enabled else 3.0},'expire-audio':{'task':'classbridge.expire_audio','schedule':3600.0},
                    'recover-abandoned':{'task':'classbridge.recover_abandoned','schedule':60.0}})
 
 
@@ -29,20 +30,35 @@ async def translate(db,task):
     if not row:return {'skipped':'source_deleted'}
     latest=db.query(SegmentRevision).filter_by(session_id=row.session_id,sentence_id=row.sentence_id).order_by(SegmentRevision.source_revision.desc()).first()
     if latest.id!=row.id or latest.status!='final':return {'skipped':'superseded_source'}
+    if db.query(Translation).filter_by(segment_id=row.id).first():return {'skipped':'translation_already_saved'}
     session=db.get(Session,row.session_id)
     if session.mode=='demo':return {'skipped':'demo_translation_committed_atomically'}
     user=db.get(User,session.user_id)
+    terms=(user.settings or {}).get('terms',[])
+    reused=None
+    if settings.incremental_translation_enabled:
+        from app.services.incremental_translation import translation_spec,validated_reuse
+        reused=validated_reuse(task.payload.get('preview_candidate'),row,translation_spec(settings,terms),now())
     import time
-    timing=TranslationTiming();translated='';first=None;last_emit=0
+    translated='';first=None;last_emit=0
     source_id=row.id;source_created=row.created_at.replace(tzinfo=timezone.utc) if row.created_at.tzinfo is None else row.created_at
     execution_time=now()
     queue_wait,clock_skew=wall_queue_ms(task.created_at,execution_time)
     source_wait,_=wall_queue_ms(source_created,execution_time)
     db.commit()
-    async for delta in AliyunProvider().translate_stream(row.text,terms=(user.settings or {}).get('terms',[])):
-        timing.token();first=timing.first
+    timing=TranslationTiming()
+    async def output():
+        if reused is not None:
+            yield reused
+        else:
+            kwargs={'terms':terms}
+            if settings.incremental_translation_enabled:kwargs['require_complete']=True
+            async for delta in AliyunProvider().translate_stream(row.text,**kwargs):yield delta
+    async for delta in output():
+        if not delta:continue
+        timing.token();first=0 if reused is not None else timing.first
         translated+=delta
-        if time.monotonic()-last_emit>=.15:
+        if reused is None and time.monotonic()-last_emit>=(settings.translation_emit_seconds if settings.incremental_translation_enabled else .15):
             db.expire_all();source=db.get(SegmentRevision,source_id)
             if not source:return {'skipped':'source_deleted'}
             current=db.query(SegmentRevision).filter_by(session_id=source.session_id,sentence_id=source.sentence_id).order_by(SegmentRevision.source_revision.desc()).first()
@@ -58,15 +74,16 @@ async def translate(db,task):
     if not translated.strip():
         from app.providers.aliyun import ProviderError
         raise ProviderError('format_error','翻译服务未返回文本，原文已保留。')
-    model_timing=timing.finish();elapsed=model_timing['translation_model_final_ms']
+    model_timing=timing.finish() if reused is None else {'translation_model_first_ms':0,'translation_model_final_ms':0}
+    elapsed=model_timing['translation_model_final_ms']
     source_delay=max(0,int(row.latency.get('source_final_ms',0)))
     row.latency={**row.latency,'translation_first_ms':source_delay+source_wait+(first or 0),
       'translation_final_ms':source_delay+source_wait+elapsed,'translation_queue_ms':queue_wait,
-      **model_timing,'translation_clock':'server_estimate_from_source_audio_end',
+      **model_timing,'translation_reused':reused is not None,'translation_clock':'server_estimate_from_source_audio_end',
       'translation_queue_clock':'wall_task_created_to_attempt_start','translation_queue_clock_skew':clock_skew}
     save_translation(db,row.id,translated)
     db.commit()
-    return {'segment_id':row.id}
+    return {'segment_id':row.id,'reused':reused is not None,'translation_queue_ms':queue_wait,**model_timing}
 
 
 async def reprocess(db,task):
@@ -176,7 +193,10 @@ async def execute_task(task_id):
                 from app.services.knowledge import handle_task
                 result=await handle_task(task.kind,task.payload,db)
             task=db.get(ProcessingTask,task_id)
-            if task:task.status='completed';task.result=result or {};task.error=None;task.updated_at=now();db.commit()
+            if task:
+                task.status='completed';task.result=result or {};task.error=None;task.updated_at=now()
+                if 'preview_candidate' in task.payload:task.payload={k:v for k,v in task.payload.items() if k!='preview_candidate'}
+                db.commit()
         except PendingRemoteTask:
             db.rollback();task=db.get(ProcessingTask,task_id)
             if task:
@@ -204,8 +224,15 @@ def process_task(task_id):asyncio.run(execute_task(task_id))
 
 
 def pending_task_ids(db):
-    rows=db.query(ProcessingTask).filter(ProcessingTask.status.in_(['pending','retry'])).order_by(ProcessingTask.created_at).limit(50).all()
     current=now()
+    query=db.query(ProcessingTask).filter(ProcessingTask.status.in_(['pending','retry']))
+    if settings.incremental_translation_enabled:
+        # Filter retry backoff BEFORE limit, so sleeping retries cannot hide a
+        # fresh final translation behind the first 50 rows.
+        due=or_(*[and_(ProcessingTask.attempts==n,ProcessingTask.updated_at<=current-timedelta(seconds=min(30,2**max(1,n)))) for n in range(5)],
+                and_(ProcessingTask.attempts>=5,ProcessingTask.updated_at<=current-timedelta(seconds=30)))
+        query=query.filter(or_(ProcessingTask.status=='pending',due)).order_by(case((ProcessingTask.kind=='translate',0),else_=1))
+    rows=query.order_by(ProcessingTask.created_at).limit(50).all()
     return [t.id for t in rows if t.status=='pending' or (current-(t.updated_at.replace(tzinfo=timezone.utc) if t.updated_at.tzinfo is None else t.updated_at)).total_seconds()>=min(30,2**max(1,t.attempts))]
 
 
@@ -214,7 +241,13 @@ def dispatch_outbox():
     with SessionLocal() as db:
         for task_id in pending_task_ids(db):
             box=db.query(Outbox).filter_by(task_id=task_id).first()
-            process_task.delay(task_id)
+            if settings.incremental_translation_enabled:
+                if box and box.dispatched_at:
+                    age,_=wall_queue_ms(box.dispatched_at,now())
+                    if age<30000:continue # bound broker duplicates; outbox still recovers lost delivery
+                task=db.get(ProcessingTask,task_id)
+                process_task.apply_async(args=[task_id],priority=0 if task.kind=='translate' else 6)
+            else:process_task.delay(task_id)
             if box:box.dispatched_at=now()
             db.commit()
 
@@ -238,18 +271,35 @@ def recover_abandoned():
 
 
 async def local_worker_loop():
-    active=set();last_cleanup=0
+    active={};last_cleanup=0
+    from app.services import translation_dispatch
+    wakeup=asyncio.Event()
+    translation_dispatch.worker_loop=asyncio.get_running_loop()
+    translation_dispatch.worker_wakeup=wakeup
     try:
         while True:
-            active={t for t in active if not t.done()}
+            wakeup.clear()
+            active={tid:pair for tid,pair in active.items() if not pair[1].done()}
             if len(active)<2:
-                with SessionLocal() as db:ids=pending_task_ids(db)
-                for tid in ids[:2-len(active)]:
-                    active.add(asyncio.create_task(execute_task(tid)))
+                with SessionLocal() as db:
+                    ids=pending_task_ids(db)
+                    kinds={tid:db.get(ProcessingTask,tid).kind for tid in ids}
+                for tid in ids:
+                    if tid in active:continue
+                    if len(active)>=2:break
+                    # Keep total concurrency at two; reserve capacity for final
+                    # translation instead of starting more paid workers.
+                    if (settings.incremental_translation_enabled and kinds[tid]!='translate'
+                        and any(kind!='translate' for kind,_ in active.values())):continue
+                    active[tid]=(kinds[tid],asyncio.create_task(execute_task(tid)))
             if asyncio.get_running_loop().time()-last_cleanup>60:
                 expire_audio();recover_abandoned();last_cleanup=asyncio.get_running_loop().time()
-            await asyncio.sleep(.6)
+            if settings.incremental_translation_enabled:
+                try:await asyncio.wait_for(wakeup.wait(),timeout=settings.translation_poll_seconds)
+                except asyncio.TimeoutError:pass
+            else:await asyncio.sleep(.6)
     finally:
-        for task in active:task.cancel()
-        for task in active:
+        translation_dispatch.worker_loop=None;translation_dispatch.worker_wakeup=None
+        for _,task in active.values():task.cancel()
+        for _,task in active.values():
             with contextlib.suppress(asyncio.CancelledError):await task

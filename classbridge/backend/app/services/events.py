@@ -1,6 +1,7 @@
 """Atomic stable versions, durable event sequence and transactional task outbox."""
 from sqlalchemy import select
 from app.models import Session, Event, SegmentRevision, Translation, ProcessingTask, Outbox, uid
+from app.services import translation_dispatch  # register commit/rollback hooks
 
 
 def emit(db, session, event_type, **fields):
@@ -24,6 +25,7 @@ def enqueue(db, user_id, kind, key, payload, session_id=None, document_id=None):
                           session_id=session_id,document_id=document_id)
     db.add(task); db.flush()
     db.add(Outbox(task_id=task.id)); db.flush()
+    if kind=='translate':db.info['translation_pending']=True
     return task
 
 
@@ -48,7 +50,7 @@ def serialize_segment(db, row):
             'suggestion':visible_suggestion(task)}
 
 
-def save_final(db, session_id, stream_id, sentence_id, revision, text, start_ms, end_ms, translation=None, latency=None, provenance='realtime', force=False, commit=True):
+def save_final(db, session_id, stream_id, sentence_id, revision, text, start_ms, end_ms, translation=None, latency=None, provenance='realtime', force=False, commit=True, preview_candidate=None):
     session = db.execute(select(Session).where(Session.id == session_id).with_for_update()).scalar_one_or_none()
     if not session or (not force and session.active_stream_id != stream_id): return None
     old = db.query(SegmentRevision).filter_by(session_id=session_id,sentence_id=sentence_id).order_by(SegmentRevision.source_revision.desc()).first()
@@ -63,7 +65,9 @@ def save_final(db, session_id, stream_id, sentence_id, revision, text, start_ms,
     if translation is not None:
         save_translation(db,row.id,translation)
     else:
-        enqueue(db,session.user_id,'translate',f'translate:{row.id}',{'segment_id':row.id},session_id=session_id)
+        task_payload={'segment_id':row.id}
+        if preview_candidate is not None:task_payload['preview_candidate']=preview_candidate
+        enqueue(db,session.user_id,'translate',f'translate:{row.id}',task_payload,session_id=session_id)
     session.duration_ms = max(session.duration_ms,end_ms)
     from app.services.correction import queue_assist
     queue_assist(db,row)

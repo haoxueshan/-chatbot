@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import time
+from datetime import datetime, timedelta, timezone
 
 from app.services.stable_prefix import StablePrefixProcessor, complete_words
 from app.services.translation_timing import TranslationTiming
@@ -29,6 +30,32 @@ def translation_spec(settings, terms):
 
 def spec_digest(spec):
     return hashlib.sha256(json.dumps(spec, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def reuse_candidate(entry, text, revision, settings, *, stamp=None):
+    record=entry.completed if entry else None
+    stamp=time.monotonic() if stamp is None else stamp
+    if not record or not record.get('complete') or record['text']!=text or not record['translation'].strip():return None
+    age=stamp-record['completed_at']
+    if not 0<=age<settings.preview_reuse_ttl_seconds:return None
+    current=datetime.now(timezone.utc)
+    return {k:v for k,v in record.items() if k!='completed_at'} | {
+        'source_revision':revision,'saved_at':current.isoformat(),
+        'expires_at':(current+timedelta(seconds=settings.preview_reuse_ttl_seconds-age)).isoformat()}
+
+
+def validated_reuse(candidate, row, spec, current):
+    if not isinstance(candidate,dict):return None
+    try:
+        saved=datetime.fromisoformat(candidate['saved_at'])
+        expiry=datetime.fromisoformat(candidate['expires_at'])
+        valid=(candidate.get('complete') is True and saved<=current<expiry
+            and candidate['text']==row.text and candidate['stream_id']==row.stream_id
+            and candidate['sentence_id']==row.sentence_id and candidate['source_revision']==row.source_revision
+            and candidate['spec_digest']==spec_digest(spec)
+            and isinstance(candidate['translation'],str) and candidate['translation'].strip())
+        return candidate['translation'] if valid else None
+    except (KeyError,ValueError,TypeError):return None
 
 
 class PreviewBudget:
@@ -198,7 +225,7 @@ class IncrementalTranslator:
                  'preview_model_final_ms': timing.finish()['translation_model_final_ms'] if complete else None,
                  'preview_first_at': entry.first_output_at})
         try:
-            async for delta in self.provider.translate_stream(text, terms=self.spec['terms']):
+            async for delta in self.provider.translate_stream(text, terms=self.spec['terms'], require_complete=True):
                 if not valid(): return
                 if not delta: continue
                 timing.token(); translated += delta

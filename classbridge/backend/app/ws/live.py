@@ -281,6 +281,8 @@ class LiveCapture:
             self.final_results.add(fingerprint)
             if sid in self.translation_tasks:self.translation_tasks[sid].cancel()
             preview_entry=self.preview.finalize(sid) if self.preview else None
+            from app.services.incremental_translation import reuse_candidate
+            candidate=reuse_candidate(preview_entry,text,revision,settings) if preview_entry else None
             preview_latency={}
             if preview_entry and preview_entry.first_output_at is not None:
                 preview_latency={'preview_first_ms':max(0,int((preview_entry.first_output_at-self.started)*1000)-int(event.get('start_ms') or 0)),
@@ -288,7 +290,7 @@ class LiveCapture:
             with SessionLocal() as db:
                 save_final(db,self.session_id,self.stream_id,sid,revision,text,start,max(start,end),
                     latency={'source_first_ms':max(0,int((self.first_seen[sid]-self.started)*1000)-int(event.get('start_ms') or 0)),
-                             'source_final_ms':max(0,int((stamp-self.started)*1000)-int(event.get('end_ms') or 0)),**preview_latency})
+                             'source_final_ms':max(0,int((stamp-self.started)*1000)-int(event.get('end_ms') or 0)),**preview_latency},preview_candidate=candidate)
         else:
             preview=self.ensure_preview()
             fields={}

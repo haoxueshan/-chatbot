@@ -129,7 +129,7 @@ class AliyunProvider:
         except httpx.RequestError as exc:
             raise ProviderError("network_error", "无法连接阿里云模型服务。", True) from exc
 
-    async def translate_stream(self, text: str, *, terms=None, context="", memory=None, source_lang="auto") -> AsyncIterator[str]:
+    async def translate_stream(self, text: str, *, terms=None, context="", memory=None, source_lang="auto", require_complete=False) -> AsyncIterator[str]:
         options = {"source_lang": source_lang, "target_lang": "Chinese"}
         if terms:
             options["terms"] = [{"source": str(t["source"]), "target": str(t["target"])} for t in terms[:100] if isinstance(t, dict) and t.get("source") and t.get("target")]
@@ -139,6 +139,8 @@ class AliyunProvider:
             options["tm_list"] = [{"source": str(t["source"]), "target": str(t["target"])} for t in memory[-5:] if isinstance(t, dict) and t.get("source") and t.get("target")]
         payload = {"model": self.value("translation_model", "qwen-mt-flash"), "messages": [{"role": "user", "content": text}], "translation_options": options, "stream": True}
         auth = self.headers()
+        complete = False
+        truncated = False
         try:
             async with httpx.AsyncClient(timeout=self.timeout, verify=await tls_context()) as client:
                 async with client.stream("POST", self.base() + "/chat/completions", headers=auth, json=payload) as response:
@@ -155,15 +157,20 @@ class AliyunProvider:
                             continue
                         value = line[5:].strip()
                         if value == "[DONE]":
+                            complete = True
                             break
                         data = json.loads(value)
                         if data.get("error"):
                             raise classify_error(0, data["error"].get("code", ""))
                         choices = data.get("choices", [])
                         if choices:
+                            if choices[0].get('finish_reason') == 'stop':complete = True
+                            if choices[0].get('finish_reason') not in (None,'stop'):truncated = True
                             token = choices[0].get("delta", {}).get("content")
                             if token:
                                 yield token
+                    if require_complete and (not complete or truncated):
+                        raise ProviderError('incomplete_translation','翻译流未正常结束，未将临时结果保存为正式译文。',True)
         except httpx.TimeoutException as exc:
             raise classify_error(408) from exc
         except httpx.RequestError as exc:
