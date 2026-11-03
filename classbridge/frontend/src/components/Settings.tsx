@@ -1,3 +1,4 @@
+import { translationLanguages, translationLanguageLabel, formatTranslationTerms, parseTranslationTerms, type TargetLanguage } from "../lib/translationLanguages";
 import { useEffect, useState } from "react";
 import {
   BookOpen,
@@ -29,32 +30,15 @@ export function Settings({
     [message, setMessage] = useState("");
   useEffect(() => {
     setDraft(preferences);
-    setTerms(
-      preferences.terms
-        .map((t) =>
-          typeof t === "string"
-            ? t
-            : `${t.source || t.term || ""} = ${t.target || t.translation || ""}`,
-        )
-        .join("\n"),
-    );
+    setTerms(formatTranslationTerms(preferences.terms));
   }, [preferences]);
   const submit = async () => {
     setBusy(true);
     setMessage("");
     try {
-      const parsed = terms
-        .split("\n")
-        .map((x) => x.trim())
-        .filter(Boolean)
-        .map((x) => {
-          const [source, ...target] = x.split("=");
-          return target.length
-            ? { source: source.trim(), target: target.join("=").trim() }
-            : x;
-        });
+      const parsed = terms === formatTranslationTerms(preferences.terms) ? preferences.terms : parseTranslationTerms(terms);
       await save({ ...draft, terms: parsed });
-      setMessage("偏好已保存");
+      setMessage(`偏好已保存 · 默认字幕翻译语言：${translationLanguageLabel(draft.target_language)}`);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "保存失败");
     } finally {
@@ -87,7 +71,7 @@ export function Settings({
             </span>
             <div>
               <h2>外观与阅读</h2>
-              <p>中文优先，保持清晰。</p>
+              <p>译文优先，保持清晰。</p>
             </div>
           </div>
           <div className="settings-row">
@@ -114,12 +98,12 @@ export function Settings({
           </div>
           <div className="settings-row">
             <div>
-              <strong>中文字幕字号</strong>
+              <strong>翻译字幕字号</strong>
               <small>18–44 px，可在大屏与平板舒适阅读。</small>
             </div>
             <div className="range-control">
               <input
-                aria-label="中文字幕字号"
+                aria-label="翻译字幕字号"
                 type="range"
                 min={18}
                 max={44}
@@ -141,7 +125,7 @@ export function Settings({
           <label className="settings-row">
             <div>
               <strong>默认显示原文</strong>
-              <small>韩语和英语原文保留，与中文译文对照。</small>
+              <small>韩语和英语原文保留，与译文对照。</small>
             </div>
             <input
               className="switch"
@@ -160,7 +144,7 @@ export function Settings({
             </span>
             <div>
               <h2>语言与专业术语</h2>
-              <p>为语音识别提供课堂语言提示，中文翻译单独生成。</p>
+              <p>为语音识别提供课堂语言提示，目标语言翻译单独生成。</p>
             </div>
           </div>
           <button
@@ -194,18 +178,17 @@ export function Settings({
               ))}
             </select>
           </label>
-          <div className="settings-row">
-            <div>
-              <strong>目标语言</strong>
-              <small>第一版固定为简体中文。</small>
-            </div>
-            <span className="badge blue">简体中文</span>
-          </div>
+          <label className="settings-row">
+            <div><strong>默认字幕翻译语言</strong><small>默认语言用于新建会话，历史会话不会自动改变。</small></div>
+            <select aria-label="默认字幕翻译语言" value={draft.target_language || "zh-CN"} onChange={e=>setDraft({...draft,target_language:e.target.value as TargetLanguage})}>
+              {Object.entries(translationLanguages).map(([code,language])=><option key={code} value={code}>{language.label}</option>)}
+            </select>
+          </label>
           <label className="terms-label">
             课程术语与人名
             <small>
               每行一个正确的韩语或英语词，也可以写“原文 =
-              译文”。人名无需填写译文；请按实际课程填写。下次开始录音时生效。
+              译文”。无标签的译文只用于简体中文；其他语言可写 “[en] 작업기억 = working memory”。人名无需填写译文；请按实际课程填写。下次开始录音时生效。
               识别热词含非 ASCII 字符时最多 15 个字符，纯英文最多 7
               个单词；超长项仅用于翻译。
             </small>
@@ -405,7 +388,7 @@ export function Settings({
                 <span>
                   {{
                     asr: "流式语音识别",
-                    translation: "中文翻译",
+                    translation: "目标语言翻译",
                     summary: "阶段提取",
                     answer: "RAG 回答",
                     embedding: "向量模型",

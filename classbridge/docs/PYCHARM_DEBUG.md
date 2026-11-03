@@ -12,7 +12,7 @@
 D:\Program Files (x86)\GitDate\同声传译chatbot\classbridge\.venv\Scripts\python.exe
 ```
 
-不需要创建新的venv或重新安装依赖。Node.js/npm使用现有系统安装。若没有JavaScript/npm运行配置选项，前端在IDE终端启动即可。
+不需要创建新的venv。升级2026-11-03多语言版本时，需要在现有venv安装新增PDF依赖并迁移到0003，然后再右键运行后端入口；见 [多语言升级命令](MULTILINGUAL_TRANSLATION.md#升级与运行)。Node.js/npm使用现有系统安装。若没有JavaScript/npm运行配置选项，前端在IDE终端启动即可。
 
 ## 先停止占用端口的旧实例
 

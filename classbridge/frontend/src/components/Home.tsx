@@ -1,3 +1,4 @@
+import { translationLanguages, type TargetLanguage } from "../lib/translationLanguages";
 import { useState } from "react";
 import {
   ArrowRight,
@@ -266,6 +267,7 @@ export function NewSession({
   close,
   submit,
   defaultRetain = false,
+  defaultTarget = "zh-CN",
   retention = 7,
 }: {
   kind: string;
@@ -275,14 +277,17 @@ export function NewSession({
     kind: string;
     mode: Mode;
     retain_audio: boolean;
+    target_language: TargetLanguage;
   }) => Promise<void>;
   defaultRetain?: boolean;
+  defaultTarget?: TargetLanguage;
   retention?: number;
 }) {
   const [kind, setKind] = useState(initial),
     [title, setTitle] = useState(""),
     [mode, setMode] = useState<Mode>("demo"),
     [retain, setRetain] = useState(defaultRetain),
+    [target, setTarget] = useState<TargetLanguage>(defaultTarget),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   return (
@@ -311,6 +316,7 @@ export function NewSession({
         onSubmit={async (e) => {
           e.preventDefault();
           if (busy) return;
+          if (mode === "demo" && target !== "zh-CN") { setError("模拟演示仅支持简体中文，请选择真实课堂或简体中文。"); return; }
           setBusy(true);
           setError("");
           try {
@@ -321,6 +327,7 @@ export function NewSession({
               kind,
               mode,
               retain_audio: retain,
+              target_language: target,
             });
           } catch (err) {
             setError(err instanceof Error ? err.message : "创建失败");
@@ -383,6 +390,14 @@ export function NewSession({
               </small>
             </button>
           </div>
+          <label>
+            字幕翻译目标语言
+            <select aria-label="字幕翻译目标语言" value={target} onChange={e=>setTarget(e.target.value as TargetLanguage)}>
+              {Object.entries(translationLanguages).map(([code,language])=><option key={code} value={code}>{language.label}</option>)}
+            </select>
+            <small>创建后固定用于本会话，修改偏好不会改变历史会话。</small>
+          </label>
+          {mode === "demo" && <p role="status">模拟演示仅支持简体中文；其他目标语言请选择真实课堂。模拟模式不调用付费 API。</p>}
           <label className="checkbox-label">
             <input
               type="checkbox"
@@ -405,7 +420,7 @@ export function NewSession({
             {error}
           </div>
         )}
-        <Button type="submit" className="full" disabled={busy}>
+        <Button type="submit" className="full" disabled={busy || (mode === "demo" && target !== "zh-CN")}>
           {busy ? "正在创建…" : "创建会话"}
           <ArrowRight size={17} />
         </Button>

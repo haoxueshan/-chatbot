@@ -12,7 +12,7 @@ def emit(db, session, event_type, **fields):
     event_id = uid()
     payload = {'type':event_type,'event_id':event_id,'event_seq':session.event_seq,
                'session_id':session.id,'stream_id':session.active_stream_id,
-               'mode':session.mode, **fields}
+               'mode':session.mode,'target_language':session.target_language, **fields}
     db.add(Event(id=event_id, session_id=session.id,event_seq=session.event_seq,type=event_type,payload=payload))
     db.flush()
     return payload
@@ -39,9 +39,10 @@ def latest_segments(db, session_id):
 
 
 def serialize_segment(db, row):
-    translation = db.query(Translation).filter_by(segment_id=row.id).order_by(Translation.translation_revision.desc()).first()
+    language=db.get(Session,row.session_id).target_language
+    translation = db.query(Translation).filter_by(segment_id=row.id,target_language=language).order_by(Translation.translation_revision.desc()).first()
     failed=db.query(ProcessingTask).filter_by(idempotency_key=f'translate:{row.id}',status='failed').first() if not translation else None
-    return {'sentence_id':row.sentence_id,'stream_id':row.stream_id,'source_revision':row.source_revision,
+    return {'target_language':language,'sentence_id':row.sentence_id,'stream_id':row.stream_id,'source_revision':row.source_revision,
             'translation_revision':translation.translation_revision if translation else 0,
             'start_ms':row.start_ms,'end_ms':row.end_ms,'text':row.text,
             'translation':translation.text if translation else '', 'status':('retired' if row.status=='retired' else 'final' if translation else 'translating'),
@@ -66,7 +67,7 @@ def save_final(db, session_id, stream_id, sentence_id, revision, text, start_ms,
     if translation is not None:
         save_translation(db,row.id,translation)
     else:
-        task_payload={'segment_id':row.id}
+        task_payload={'segment_id':row.id,'source_revision':revision,'target_language':session.target_language}
         if preview_candidate is not None:task_payload['preview_candidate']=preview_candidate
         enqueue(db,session.user_id,'translate',f'translate:{row.id}',task_payload,session_id=session_id)
     session.duration_ms = max(session.duration_ms,end_ms)
@@ -74,14 +75,18 @@ def save_final(db, session_id, stream_id, sentence_id, revision, text, start_ms,
     return payload
 
 
-def save_translation(db, segment_id, text, revision=1):
+def save_translation(db, segment_id, text, revision=1, *, target_language=None):
     row = db.get(SegmentRevision,segment_id)
     if not row: return None
+    from app.services.translation_languages import target_code
+    session=db.execute(select(Session).where(Session.id==row.session_id).with_for_update()).scalar_one()
+    language=target_code(session.target_language)
+    if target_language is not None and target_language!=language:raise ValueError('译文目标语言与会话不一致')
     latest = db.query(SegmentRevision).filter_by(session_id=row.session_id,sentence_id=row.sentence_id).order_by(SegmentRevision.source_revision.desc()).first()
     if latest.id != row.id or latest.status!='final': return None
     previous = db.query(Translation).filter_by(segment_id=row.id).order_by(Translation.translation_revision.desc()).first()
     if previous and previous.translation_revision >= revision: return None
-    db.add(Translation(segment_id=row.id,source_revision=row.source_revision,translation_revision=revision,text=text,mode=row.mode))
+    db.add(Translation(segment_id=row.id,source_revision=row.source_revision,translation_revision=revision,text=text,mode=row.mode,target_language=language))
     session = db.get(Session,row.session_id)
     return emit(db,session,'translation.final',sentence_id=row.sentence_id,stream_id=row.stream_id,
                 source_revision=row.source_revision,translation_revision=revision,start_ms=row.start_ms,end_ms=row.end_ms,

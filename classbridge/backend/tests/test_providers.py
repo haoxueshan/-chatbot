@@ -170,6 +170,7 @@ async def test_streaming_asr_waits_started_sends_pcm_and_finishes(monkeypatch,mo
     else:assert start['payload']['parameters']['language_hints']==expected_hints
     assert result[1]['text']=='hello world'  # ASR output is never rewritten into the translation language.
     assert 'target_language' not in start['payload']['parameters']
+    assert 'target_lang' not in start['payload']['parameters']
     if context:
         assert start['payload']['input']['context']==[{'role':'user','content':[{'type':'input_text','text':context.strip()[:400]}]}]
     else:assert start['payload']['input']=={}

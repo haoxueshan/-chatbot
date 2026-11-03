@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 from app.api.auth import current_user
 from app.db import get_db
 from app.config import settings
 from app.models import User
 from app.services.asr_options import ASRLanguageMode, asr_vocabulary_report
+
+from app.services.translation_languages import SupportedTargetLanguage, target_code
 
 router = APIRouter(prefix='/api/settings', tags=['Settings'])
 
@@ -15,7 +17,7 @@ class Preferences(BaseModel):
     theme: str = 'light'
     subtitle_size: int = Field(default=24, ge=18, le=44)
     show_original: bool = True
-    target_language: str = 'zh-CN'
+    target_language: SupportedTargetLanguage = 'zh-CN'
     asr_language_mode: ASRLanguageMode = 'auto'
     asr_hotword_weight: Literal[2,3,4] = 2
     asr_context: str = Field(default='',max_length=400)
@@ -24,11 +26,20 @@ class Preferences(BaseModel):
     terms: list[dict | str] = Field(default_factory=list, max_length=200)
     retain_audio: bool = False
 
+    @field_validator('terms')
+    @classmethod
+    def validate_term_languages(cls,terms):
+        for term in terms:
+            if isinstance(term,dict) and 'target_language' in term:target_code(term['target_language'])
+        return terms
+
 
 @router.get('')
 def read_settings(user: User = Depends(current_user)):
     # Ignore retired/unknown JSON fields without validating old unrelated data.
     preferences={**Preferences().model_dump(), **{k:v for k,v in (user.settings or {}).items() if k in Preferences.model_fields}}
+    try:target_code(preferences['target_language'])
+    except ValueError as exc:raise HTTPException(422,detail=str(exc))
     report=asr_vocabulary_report(preferences.get('terms',[]),preferences['asr_hotword_weight'])
     from app.providers.aliyun import AliyunProvider, ProviderError
     config_error=None

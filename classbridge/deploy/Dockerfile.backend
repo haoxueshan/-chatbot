@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-wqy-zenhei fonts-nanum curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core fonts-wqy-zenhei fonts-nanum fonts-ipafont-gothic fonts-noto-core curl && rm -rf /var/lib/apt/lists/*
 COPY backend/requirements*.txt ./
 RUN pip install -r requirements.txt -c requirements.lock.txt
 RUN groupadd --gid 10001 classbridge && useradd --uid 10001 --gid classbridge --create-home classbridge && mkdir -p /data/files && chown -R classbridge:classbridge /app /data

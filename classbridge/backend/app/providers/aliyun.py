@@ -129,8 +129,11 @@ class AliyunProvider:
         except httpx.RequestError as exc:
             raise ProviderError("network_error", "无法连接阿里云模型服务。", True) from exc
 
-    async def translate_stream(self, text: str, *, terms=None, context="", memory=None, source_lang="auto", require_complete=False) -> AsyncIterator[str]:
-        options = {"source_lang": source_lang, "target_lang": "Chinese"}
+    async def translate_stream(self, text: str, *, terms=None, context="", memory=None, source_lang="auto", target_lang="Chinese", require_complete=False) -> AsyncIterator[str]:
+        from app.services.translation_languages import LANGUAGES
+        if target_lang not in {v['mt_name'] for v in LANGUAGES.values()}:
+            raise ProviderError('unsupported_target_language','不支持的字幕目标语言')
+        options = {"source_lang": source_lang, "target_lang": target_lang}
         if terms:
             options["terms"] = [{"source": str(t["source"]), "target": str(t["target"])} for t in terms[:100] if isinstance(t, dict) and t.get("source") and t.get("target")]
         if context:

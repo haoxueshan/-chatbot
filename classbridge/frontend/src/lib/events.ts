@@ -1,3 +1,4 @@
+import type { TargetLanguage } from "./translationLanguages";
 import type {
   BridgeEvent,
   Segment,
@@ -6,6 +7,7 @@ import type {
 } from "./types";
 export interface TranscriptState {
   sessionId: string;
+  targetLanguage: TargetLanguage;
   sources: Record<string, SourceState>;
   translations: Record<string, TranslationState>;
   seen: string[];
@@ -25,9 +27,11 @@ export function initialTranscript(
   sessionId: string,
   segments: Segment[] = [],
   unconfirmed: Segment[] = [],
+  targetLanguage: TargetLanguage = "zh-CN",
 ): TranscriptState {
   let state: TranscriptState = {
     sessionId,
+    targetLanguage,
     sources: {},
     translations: {},
     seen: [],
@@ -133,6 +137,8 @@ export function applyTranslationEvent(
   state: TranscriptState,
   event: BridgeEvent,
 ): TranscriptState {
+  // Missing language is exclusively the legacy Chinese event contract.
+  if ((event.target_language ?? "zh-CN") !== state.targetLanguage) return state;
   const key = keyOf(event),
     source = state.sources[key],
     old = state.translations[key];
@@ -192,6 +198,7 @@ export function applyTranslationEvent(
       return state;
   }
   const value: TranslationState = {
+    target_language: state.targetLanguage,
     sentence_id: event.sentence_id!,
     stream_id: event.stream_id!,
     source_revision: revision,
@@ -381,6 +388,7 @@ export function orderedSegments(state: TranscriptState): Segment[] {
     .map((s): Segment => {
       const t = visibleTranslation(s, state.translations[identity(s)]);
       return {
+        target_language: state.targetLanguage,
         sentence_id: s.sentence_id,
         stream_id: s.stream_id,
         text: s.text,

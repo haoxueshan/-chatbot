@@ -9,6 +9,8 @@
 **/.env
 **/.env.*
 **/data
+!backend/app/data
+!backend/app/data/translation_languages.json
 **/logs
 **/.local
 **/backups

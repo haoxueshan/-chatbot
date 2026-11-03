@@ -1,3 +1,4 @@
+import { translationLanguageLabel, translationDirection } from "../lib/translationLanguages";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
@@ -352,6 +353,8 @@ export function SessionView({
       setExportBusy(false);
     }
   };
+  const target = session.target_language || "zh-CN";
+  const targetLabel = translationLanguageLabel(target);
   return (
     <div className={`session-view ${focus ? "focus-mode" : ""}`}>
       <div className="session-heading">
@@ -370,12 +373,13 @@ export function SessionView({
             <span>·</span>
             <span>
               <Languages size={13} />
-              {session.mode === "demo" ? "韩语 / 英语 → 简体中文" : (
+              {session.mode === "demo" ? `韩语 / 英语 → ${targetLabel}` : (
                 live.active
-                  ? `当前识别提示：${live.preparing ? "准备中" : live.asrLanguageMode ? asrLanguageLabels[live.asrLanguageMode] : "服务端未报告"} → 简体中文`
-                  : `下次识别提示：${asrLanguageLabels[preferences.asr_language_mode || "auto"]} → 简体中文`
+                  ? `当前识别提示：${live.preparing ? "准备中" : live.asrLanguageMode ? asrLanguageLabels[live.asrLanguageMode] : "服务端未报告"} → ${targetLabel}`
+                  : `下次识别提示：${asrLanguageLabels[preferences.asr_language_mode || "auto"]} → ${targetLabel}`
               )}
             </span>
+            {live.active && live.translationTarget && <span>服务端目标：{translationLanguageLabel(live.translationTarget)}</span>}
             <span
               className={`badge ${session.mode === "demo" ? "amber" : "blue"}`}
             >
@@ -481,6 +485,9 @@ export function SessionView({
               ? "模拟演示，不调用付费 API"
               : "真实语音理解"}
           </strong>
+          {live.active && !live.preparing && live.translationTarget && (
+            <small>本次翻译：{translationLanguageLabel(live.translationTarget)}</small>
+          )}
           {session.mode === "real" && live.active && !live.preparing && live.asrEnhancement && (
             <small>本次热词 {live.asrEnhancement.hotword_count} 项 · 课程背景 {live.asrEnhancement.context_chars} 字</small>
           )}
@@ -585,7 +592,7 @@ export function SessionView({
                 <p>
                   {session.mode === "demo"
                     ? "点击下方「开始模拟」，体验韩英课堂的双语字幕。"
-                    : "点击「开始录音」后申请麦克风权限，原文与中文将在这里实时出现。"}
+                    : "点击「开始录音」后申请麦克风权限，原文与译文将在这里实时出现。"}
                 </p>
                 <div>
                   <span>
@@ -667,19 +674,21 @@ export function SessionView({
                   </p>
                 )}
                 <p
+                  lang={target}
+                  dir={translationDirection(target)}
                   className={`translation-text ${!s.translation_final ? "temporary" : ""}`}
                   style={{ fontSize: preferences.subtitle_size || 24 }}
                 >
                   {s.source_status === "interrupted" ? "对应原文尚未正式确认" : s.translation_status === "failed" ? "翻译失败，原文已保留" : s.translation || (
                     <span className="translation-waiting">
-                      <span className="typing-dots">•••</span> 正在翻译…
+                      <span className="typing-dots">•••</span> 正在翻译为{targetLabel}…
                     </span>
                   )}
                 </p>
-                {s.translation_final && <small className="translation-status">中文已完成</small>}
+                {s.translation_final && <small className="translation-status">{targetLabel}翻译已完成</small>}
                 {s.translation && !s.translation_final && s.translation_status !== "failed" && (
                   <small className="temporary-label">
-                    {s.preview_source_text ? "临时中文预览 · 仅对应已翻译部分，可被替换" : "临时译文 · 会随原文修订"}
+                    {s.source_final ? `正在翻译为${targetLabel}… · 当前为临时译文` : s.preview_source_text ? "临时翻译预览 · 仅对应已翻译部分，可被替换" : "临时译文 · 会随原文修订"}
                   </small>
                 )}
                 {s.provenance === "user_correction" && <button className="text-button" onClick={() => void jumpEvidence(s.sentence_id, s.source_revision - 1)}>
@@ -916,7 +925,7 @@ export function SessionView({
                     source_final_ms: "原文定稿",
                     translation_first_ms: "译文首字",
                     translation_final_ms: "译文定稿",
-                    preview_first_ms: "临时中文首字",
+                    preview_first_ms: "临时译文首字",
                     translation_queue_ms: "后台排队",
                     translation_model_first_ms: "模型首字耗时",
                     translation_model_final_ms: "模型完成耗时",

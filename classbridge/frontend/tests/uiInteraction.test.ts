@@ -48,7 +48,7 @@ const preferences = {
   audio_retention_days: 7,
   terms: [{ source: "작업기억", target: "工作记忆" }],
   asr_context: "인지심리학",
-  target_language: "Chinese",
+  target_language: "zh-CN",
 } as any;
 const lesson = {
   id: "lesson",
@@ -159,6 +159,57 @@ afterEach(async () => {
   setupApi();
 });
 after(async () => dom.happyDOM.close());
+
+test("settings save and restore a selectable default without clearing tagged terms", async () => {
+  let saved:any;
+  const original={...preferences,terms:[...preferences.terms,{source:"기억",target:"memory",target_language:"en"}]};
+  const view=await mount(h(Settings,{preferences:original,save:async(p:any)=>{saved=p;}}));
+  const select=view.container.querySelector<HTMLSelectElement>('[aria-label="默认字幕翻译语言"]')!;
+  assert.equal(select.options.length,14);
+  await act(async()=>{select.value="ja";select.dispatchEvent(new dom.Event("change",{bubbles:true}));});
+  await click("保存偏好");
+  assert.equal(saved.target_language,"ja");
+  assert.deepEqual(saved.terms,original.terms);
+  assert.match(view.container.textContent!,/默认字幕翻译语言：日语/);
+  await view.render(null);
+  await view.render(h(Settings,{preferences:saved,save:async()=>{}}));
+  assert.equal(view.container.querySelector<HTMLSelectElement>('[aria-label="默认字幕翻译语言"]')!.value,"ja");
+});
+
+test("new session uses the saved target and demo cannot silently call a non-Chinese translation", async () => {
+  let saved:any;
+  const view=await mount(h(NewSession,{kind:"classroom",defaultTarget:"en",close(){},submit:async(data:any)=>{saved=data;}}));
+  const select=document.querySelector<HTMLSelectElement>('[aria-label="字幕翻译目标语言"]')!;
+  assert.equal(select.value,"en");
+  assert.equal(button("创建会话").disabled,true);
+  assert.match(document.body.textContent!,/模拟演示仅支持简体中文/);
+  assert.equal(saved,undefined);
+  const real=Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(b=>b.textContent?.includes("真实课堂"))!;
+  await act(async()=>real.click());
+  await click("创建会话");
+  assert.equal(saved.target_language,"en");
+  assert.equal(saved.mode,"real");
+});
+
+test("subtitle labels and RTL direction follow the session snapshot despite preference changes", async () => {
+  const props={session:{...lesson,mode:"real",target_language:"ar"},preferences:{...preferences,target_language:"ja"},
+    onActivity(){},refresh(){},back(){},notify(){},openSession(){},deleted(){}} as any;
+  const view=await mount(h(SessionView,props));
+  const socket=Socket.instances.at(-1)!;
+  await act(async()=>socket.open());
+  const base={session_id:"lesson",stream_id:"s",sentence_id:"1",source_revision:1,translation_revision:1,event_seq:0,start_ms:0,end_ms:1000,mode:"real"};
+  await act(async()=>socket.event({...base,type:"transcript.partial",event_id:"p",text:"한국어 원문"}));
+  await act(async()=>socket.event({...base,type:"translation.partial",event_id:"t",translation:"مرحبا بالعالم",target_language:"ar"}));
+  assert.match(view.container.textContent!,/临时译文/);
+  assert.equal(view.container.querySelector('[lang="ar"]')?.getAttribute("dir"),"rtl");
+  await act(async()=>socket.event({...base,type:"transcript.final",event_id:"f",event_seq:1,text:"한국어 원문"}));
+  assert.match(view.container.textContent!,/正在翻译为阿拉伯语/);
+  await act(async()=>socket.event({...base,type:"translation.final",event_id:"tf",event_seq:2,translation:"مرحبا بالعالم",target_language:"ar"}));
+  assert.match(view.container.textContent!,/阿拉伯语翻译已完成/);
+  await view.render(h(SessionView,{...props,preferences:{...preferences,target_language:"en"}}));
+  assert.match(view.container.textContent!,/阿拉伯语翻译已完成/);
+  assert.equal(Socket.instances.length,1);
+});
 
 test("opening a new-session form from the mobile drawer retains input focus and restores menu on Escape", async () => {
   const original = dom.matchMedia.bind(dom);
@@ -547,7 +598,7 @@ test("incremental subtitle DOM separates reversible source and mutable Chinese w
   assert.equal(view.container.querySelector(".unstable-source-tail")?.textContent, "배웁니다.");
   await act(async () => socket.event({ ...base, type: "translation.partial", event_id: "t",
     translation: "今天学习 RAG", preview_source_text: "오늘은 RAG", preview_request_id: 1, preview_complete: true }));
-  assert.match(view.container.textContent!, /临时中文预览/);
+  assert.match(view.container.textContent!, /临时翻译预览/);
   await act(async () => socket.event({ ...base, type: "transcript.final", event_id: "f", event_seq: 1,
     source_revision: 2, text: "오늘은 RAG 배웁니다." }));
   assert.equal(view.container.querySelector(".unstable-source-tail"), null);

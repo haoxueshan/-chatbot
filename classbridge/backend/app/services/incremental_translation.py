@@ -16,14 +16,13 @@ from app.services.stable_prefix import StablePrefixProcessor, complete_words
 from app.services.translation_timing import TranslationTiming
 
 
-def translation_spec(settings, terms):
+def translation_spec(settings, terms, target_language='zh-CN'):
     # Mirror exactly the MT adapter's existing options. ASR context is NOT MT
     # context. Include endpoint/region as well as model to prevent cross-config reuse.
-    normalized = [{'source': str(t['source']), 'target': str(t['target'])}
-                  for t in (terms or [])[:100]
-                  if isinstance(t, dict) and t.get('source') and t.get('target')]
+    from app.services.translation_languages import translation_terms,target_name
+    normalized=translation_terms(terms,target_language)
     return {'model': settings.translation_model, 'terms': normalized,
-            'source_lang': 'auto', 'target_lang': 'Chinese', 'context': '', 'memory': [],
+            'source_lang': 'auto', 'target_lang': target_name(target_language), 'context': '', 'memory': [],
             'endpoint': settings.openai_base_url, 'region': settings.dashscope_region,
             'workspace': settings.dashscope_workspace_id}
 
@@ -225,7 +224,7 @@ class IncrementalTranslator:
                  'preview_model_final_ms': timing.finish()['translation_model_final_ms'] if complete else None,
                  'preview_first_at': entry.first_output_at})
         try:
-            async for delta in self.provider.translate_stream(text, terms=self.spec['terms'], require_complete=True):
+            async for delta in self.provider.translate_stream(text, terms=self.spec['terms'], target_lang=self.spec['target_lang'], require_complete=True):
                 if not valid(): return
                 if not delta: continue
                 timing.token(); translated += delta

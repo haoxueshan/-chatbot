@@ -1,5 +1,21 @@
 # 阿里云模型与协议兼容记录
 
+## 2026-11-03：多语言字幕翻译
+
+重新核对阿里云[机器翻译文档](https://help.aliyun.com/zh/model-studio/machine-translation)及[官方语言表](https://www.alibabacloud.com/help/en/model-studio/machine-translation)。Qwen MT 继续使用单条 user 消息、`translation_options.source_lang="auto"`、SSE；`target_lang` 现在来自固定的会话语言快照。
+
+| 内部代码 | 官方 target_lang |
+| --- | --- |
+| zh-CN / zh-TW | Chinese / Traditional Chinese |
+| en / ko / ja | English / Korean / Japanese |
+| fr / de / es | French / German / Spanish |
+| ru / pt / it | Russian / Portuguese / Italian |
+| th / vi / ar | Thai / Vietnamese / Arabic |
+
+唯一注册表是 `backend/app/data/translation_languages.json`，前后端共用。默认 `qwen-mt-flash` 及原地域、业务空间、认证、超时配置不变；没有向 Streaming ASR 增加翻译语言字段。未标记目标语言的旧术语只用于 zh-CN；词表原词仍可供 ASR 使用。
+
+验证等级：**文档支持**这 14 种语言；**14 组 Mock 请求参数/SSE 验证通过**；本次新增真实调用 **0 次**。没有验证账号对各目标语的实际翻译质量、韩英课堂效果或费用。之前的短静音/单词接口检查不能替代本次多语言真实效果验证。详见 [多语言交付记录](MULTILINGUAL_TRANSLATION.md)。
+
 2026-11-02识别逻辑复核：官方[客户端事件](https://help.aliyun.com/zh/model-studio/qwen-audio-asr-streaming-client-events)仍要求task-started后发送音频、finish-task结束；max_sentence_silence默认800ms。[服务端事件](https://help.aliyun.com/zh/model-studio/qwen-audio-asr-streaming-server-events)以sentence_id关联句子，sentence_end区分中间/最终结果。适配增加启动task_id校验，应用去重重复定稿并拒绝迟到中间结果降级；没有新增云端请求参数。这一轮只做协议文档复核和本地测试，没有新增真实API或课堂效果验证，详见ASR_LOGIC_REVIEW.md。
 
 
@@ -95,7 +111,7 @@ DASHSCOPE_BASE_URL=https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1
 
 ## 翻译与延迟
 
-Qwen-MT 接收一条 user 消息，内容仅为当前待翻译文本。语言配置放在 `translation_options`，本应用使用 `source_lang=auto`、`target_lang=Chinese`；术语通过 `terms:[{source,target}]`，领域提示通过 `domains`，历史译例通过 `tm_list:[{source,target}]`。适配器支持这些官方字段；实时调用默认仅传入用户术语，不拼接未经支持的 system/context 消息。`qwen-mt-flash` 的 SSE 返回 `choices[].delta.content`。[翻译文档](https://help.aliyun.com/zh/model-studio/machine-translation)
+Qwen-MT 接收一条 user 消息，内容仅为当前待翻译文本。语言配置放在 `translation_options`，本应用使用 `source_lang=auto`、`target_lang=会话语言对应的官方英文名称`（默认 Chinese）；术语通过 `terms:[{source,target}]`，领域提示通过 `domains`，历史译例通过 `tm_list:[{source,target}]`。适配器支持这些官方字段；实时调用默认仅传入用户术语，不拼接未经支持的 system/context 消息。`qwen-mt-flash` 的 SSE 返回 `choices[].delta.content`。[翻译文档](https://help.aliyun.com/zh/model-studio/machine-translation)
 
 **MT 流式输出是文本翻译结果逐 token 返回，不是音频持续同传接口。** 音频持续识别和文本翻译是两个独立任务。临时原文节流翻译、原文定稿后的最终翻译，由本应用版本逻辑衔接；过期临时翻译不能覆盖定稿。四类延迟指标是应用测量项，不把受控测试的耗时当成真实教室延迟。
 

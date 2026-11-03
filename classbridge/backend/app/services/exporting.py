@@ -3,9 +3,13 @@ from functools import lru_cache
 from html import escape
 from io import BytesIO
 from pathlib import Path
+import re
+import unicodedata
+from arabic_reshaper import ArabicReshaper
+from bidi.algorithm import get_display
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
@@ -24,6 +28,10 @@ def export_fonts():
         ("CBChineseWin", "C:/Windows/Fonts/msyh.ttc"),
         ("CBKorean", "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"),
         ("CBKoreanWin", "C:/Windows/Fonts/malgun.ttf"),
+        ("CBJapanese", "/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf"),
+        ("CBJapaneseWin", "C:/Windows/Fonts/YuGothR.ttc"),
+        ("CBThai", "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf"),
+        ("CBThaiWin", "C:/Windows/Fonts/LeelawUI.ttf"),
     ]
     result = []
     for name, filename in candidates:
@@ -61,6 +69,36 @@ def rich_text(text: str):
     return "".join(groups)
 
 
+_arabic = ArabicReshaper(configuration={'delete_harakat': False, 'shift_harakat_position': True})
+
+
+def visual_rtl(text: str) -> str:
+    # Shape only the export view. Stored evidence and MD/TXT stay logical Unicode.
+    return get_display(_arabic.reshape(text), base_dir='R')
+
+
+def text_width(text: str, size: float) -> float:
+    return sum(pdfmetrics.stringWidth(c, font_for(c), size) for c in text)
+
+
+def rtl_lines(text: str, width: float, size: float) -> list[str]:
+    # Wrap in LOGICAL order before applying bidi per physical line; reversing a
+    # whole paragraph first would put its final sentence at the top of the page.
+    lines, current = [], ''
+    for word in re.findall(r'\S+\s*', text):
+        candidate = current + word
+        if current and text_width(visual_rtl(candidate.rstrip()), size) > width:
+            lines.append(visual_rtl(current.rstrip()))
+            current = ''
+        for char in word:
+            if current and not unicodedata.combining(char) and text_width(visual_rtl(current + char), size) > width:
+                lines.append(visual_rtl(current.rstrip()))
+                current = ''
+            current += char
+    if current.strip():lines.append(visual_rtl(current.rstrip()))
+    return lines
+
+
 def render_pdf(content: str, title: str = "ClassBridge 会话记录") -> bytes:
     output = BytesIO()
     font = export_fonts()[0][0]
@@ -76,7 +114,15 @@ def render_pdf(content: str, title: str = "ClassBridge 会话记录") -> bytes:
         if not line.strip():
             flow.append(Spacer(1, 6))
             continue
-        flow.append(Paragraph(rich_text(line.lstrip("# ") if index == 0 else line), heading if index == 0 else body))
+        line = line.lstrip("# ") if index == 0 else line
+        style = heading if index == 0 else body
+        if any(unicodedata.bidirectional(c) in ('R','AL') for c in line):
+            rtl_style = ParagraphStyle('rtl', parent=style, alignment=TA_RIGHT, wordWrap=None, spaceAfter=0)
+            for physical in rtl_lines(line, document.width - 12, style.fontSize):
+                flow.append(Paragraph(rich_text(physical), rtl_style))
+            flow.append(Spacer(1, style.spaceAfter))
+        else:
+            flow.append(Paragraph(rich_text(line), style))
 
     def page(canvas, doc):
         canvas.saveState()

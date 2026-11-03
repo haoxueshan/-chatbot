@@ -50,6 +50,15 @@ class LiveCapture:
         self.received_audio_ms=0;self.last_audio_at=None;self.level_window=deque(maxlen=50)
         self.preview=None
         self.unconfirmed={}
+        self.target_language=None
+
+    def capture_language(self):
+        if self.target_language is None:
+            from app.services.translation_languages import target_code
+            with SessionLocal() as db:
+                row=db.get(Session,self.session_id)
+                self.target_language=target_code(row.target_language) if row else 'zh-CN'
+        return self.target_language
 
     def ensure_preview(self):
         if not settings.incremental_translation_enabled or self.mode!='real':return None
@@ -59,7 +68,7 @@ class LiveCapture:
             with SessionLocal() as db:
                 user=db.get(User,self.user_id)
                 terms=(user.settings or {}).get('terms',[]) if user else []
-            self.preview=IncrementalTranslator(settings,self.stream_id,translation_spec(settings,terms),
+            self.preview=IncrementalTranslator(settings,self.stream_id,translation_spec(settings,terms,self.capture_language()),
                 AliyunProvider(),self.publish_preview)
         return self.preview
 
@@ -82,7 +91,7 @@ class LiveCapture:
 
     async def transient(self,event_type,**fields):
         await self.send({'type':event_type,'event_id':uid(),'event_seq':0,'session_id':self.session_id,
-          'stream_id':self.stream_id,'mode':self.mode,**fields})
+          'stream_id':self.stream_id,'mode':self.mode,'target_language':self.capture_language(),**fields})
 
     async def start(self,request_id=None):
         if self.task and not self.task.done():
@@ -100,6 +109,7 @@ class LiveCapture:
                 await self.transient('processing.failed',request_id=request_id,code='application_duration_limit',message='此会话已达到105分钟应用限制，请创建新会话');return
             if sum(1 for item in connections.values() if item.task and not item.task.done())>=2:
                 await self.transient('processing.failed',request_id=request_id,code='concurrency_limit',message='同时采集的会话已达应用上限，请先停止另一会话');return
+            self.target_language=row.target_language
             self.stream_id=uid();self.mode=row.mode;self.offset=row.duration_ms;self.started=0;self.stopping=False
             self.ready=False;self.request_id=request_id
             self.asr_metrics={};self.failure_reported=False
@@ -253,7 +263,9 @@ class LiveCapture:
             provider=AliyunProvider()
             translated=''
             with SessionLocal() as db:terms=(db.get(User,self.user_id).settings or {}).get('terms',[])
-            async for delta in provider.translate_stream(text,terms=terms):
+            from app.services.translation_languages import translation_terms,target_name
+            language=self.capture_language()
+            async for delta in provider.translate_stream(text,terms=translation_terms(terms,language),target_lang=target_name(language)):
                 if sentence_id in self.finalized or self.current_revisions.get(sentence_id)!=revision:return
                 translated+=delta
                 await self.transient('translation.partial',sentence_id=sentence_id,source_revision=revision,translation_revision=revision,
@@ -371,6 +383,7 @@ class LiveCapture:
             await asyncio.sleep(1.6)
 
     async def run(self):
+        self.capture_language()
         periodic=asyncio.create_task(self.periodic_summary())
         health=asyncio.create_task(self.report_health())
         preview_timer=asyncio.create_task(self.preview_loop()) if settings.incremental_translation_enabled and self.mode=='real' else None

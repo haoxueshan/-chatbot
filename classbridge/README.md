@@ -2,6 +2,8 @@
 
 面向韩英交替课堂、会议和访谈的私人语音理解应用。React / TypeScript / Vite 前端，FastAPI 后端，生产使用 PostgreSQL + pgvector、Redis / Celery、Nginx。项目独立放在 `classbridge/`，不覆盖其他网站。
 
+2026-11-03 多语言版本：字幕可选 14 种目标语言，在设置中保存默认值，新建会话时固定。已有会话保持原语言；模拟演示只支持简体中文。升级前停止 API/worker、备份数据库，安装新增 PDF 排版依赖并运行 `alembic upgrade head`（0003），再重启前后端。具体命令、测试和限制见 [多语言交付记录](docs/MULTILINGUAL_TRANSLATION.md)。本次没有调用真实模型。
+
 **当前交付：本地模拟链路已运行并验收；2026-11-01已通过真实ASR的200毫秒静音任务和单词MT请求，尚未验证真实课堂效果；Docker配置已提供，但本机没有可用Docker Engine，不能声称容器启动成功。** 最新云接口验证见 [模型兼容记录](docs/MODEL_COMPATIBILITY.md)，完整状态见 [功能清单](docs/FEATURE_STATUS.md) 与 [测试记录](docs/TEST_RESULTS.md)。
 
 后续用户真实会话已保存约42分钟音频和242条原文记录，但发生运行中断流，不能据此认定长课堂稳定性通过。2026-11-01已补充准备握手、音频转发调度、发送失败监测与安全诊断；更新后重启后端并刷新页面，排查方法见 [实时录音中断排查](docs/REALTIME_TROUBLESHOOTING.md)。

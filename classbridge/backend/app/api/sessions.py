@@ -15,6 +15,7 @@ from app.services.events import latest_segments, serialize_segment, enqueue, emi
 from app.services.timing import captured_duration_ms
 from app.services.retired_tasks import RETIRED_TASK_KIND
 from app.schemas.stages import stage_text
+from app.services.translation_languages import target_code, LANGUAGES
 
 router = APIRouter(prefix='/api/sessions', tags=['Sessions'])
 
@@ -36,7 +37,7 @@ def stage_dict(row,current_versions=None):
 def session_dict(db, row, detail=False):
     audio = db.query(AudioAsset).filter_by(session_id=row.id).all()
     result = {'id':row.id,'title':row.title,'kind':row.kind,'mode':row.mode,'status':row.status,
-      'retain_audio':row.retain_audio,'created_at':row.created_at.isoformat(),'duration_ms':row.duration_ms,
+      'target_language':row.target_language, 'retain_audio':row.retain_audio,'created_at':row.created_at.isoformat(),'duration_ms':row.duration_ms,
       'event_seq':row.event_seq,'active_stream_id':row.active_stream_id,'captured_ms':captured_duration_ms(db,row.id),
       'audio_status':'available' if any(a.status=='ready' for a in audio) else ('recording' if any(a.status=='writing' for a in audio) else 'not_saved')}
     if detail:
@@ -65,10 +66,15 @@ def list_sessions(q: str = Query('',max_length=250), user: User = Depends(curren
 
 @router.post('',status_code=201)
 def create_session(body: CreateSession,user: User=Depends(current_user),db:DBSession=Depends(get_db)):
+    requested=body.target_language if 'target_language' in body.model_fields_set else (user.settings or {}).get('target_language','zh-CN')
+    try:language=target_code(requested)
+    except ValueError as exc:raise HTTPException(422,detail=str(exc))
+    if body.mode=='demo' and language!='zh-CN':
+        raise HTTPException(422,detail={'code':'demo_language_unsupported','message':'模拟演示仅支持简体中文；其他目标语言请选择真实模式。'})
     if body.mode=='real':
         from app.providers.aliyun import AliyunProvider
         AliyunProvider().ensure_configured()
-    row = Session(user_id=user.id,**body.model_dump())
+    row = Session(user_id=user.id,**{**body.model_dump(),'target_language':language})
     db.add(row);db.commit()
     return session_dict(db,row)
 
@@ -166,7 +172,7 @@ def map_speaker(session_id:str,body:dict,user:User=Depends(current_user),db:DBSe
 
 
 def export_text(db,row,markdown=True):
-    lines=[('# ' if markdown else '')+row.title, f'模式：{"模拟演示" if row.mode=="demo" else "真实识别"}', '']
+    lines=[('# ' if markdown else '')+row.title, f'模式：{"模拟演示" if row.mode=="demo" else "真实识别"}', f'字幕翻译目标语言：{LANGUAGES[target_code(row.target_language)]["label"]}', '']
     for s in latest_segments(db,row.id):
         d=serialize_segment(db,s)
         time=f'{s.start_ms//60000:02}:{s.start_ms//1000%60:02}–{s.end_ms//60000:02}:{s.end_ms//1000%60:02}'

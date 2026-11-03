@@ -10,7 +10,7 @@
 | POST `/api/auth/login` | `{username,password}` 登录 |
 | GET `/api/auth/me` / POST `/api/auth/logout` | 当前身份 / 撤销登录 |
 | GET `/api/sessions?q=` | 私有会话及原文/译文搜索 |
-| POST `/api/sessions` | `{title,kind,mode,retain_audio}`，kind为classroom/meeting/interview，mode为demo/real |
+| POST `/api/sessions` | `{title,kind,mode,retain_audio,target_language}`，kind为classroom/meeting/interview，mode为demo/real |
 | GET `/api/sessions/{id}` | 最新稳定字幕、阶段、任务、缺口、音频状态、事件序号 |
 | DELETE `/api/sessions/{id}/segments` | 清空字幕及其派生内容，保留资料；录音中拒绝 |
 | DELETE `/api/sessions/{id}` | 删除会话、关联资料及私有文件、派生内容；录音中拒绝 |
@@ -33,6 +33,16 @@
 问答scope为recent（最近10分钟）、session、documents、history。session/recent必须提供会话；documents必须明确选择资料。服务端验证所有权及模式，不能靠传ID越权。真实模式缺失密钥返回明确503，不生成模拟回答。
 
 ## 本站WebSocket
+
+### 字幕目标语言
+
+`GET/PATCH /api/settings` 的 `target_language` 是新建会话的默认值。允许 `zh-CN, zh-TW, en, ko, ja, fr, de, es, ru, pt, it, th, vi, ar`，未知代码返回 422。`POST /api/sessions` 显式字段优先；省略时读取用户默认值，无历史字段则 zh-CN。创建时锁定并保存到 Session；不存在修改已有会话语言的接口。列表、详情、字幕快照返回 `target_language`，修改偏好不会更改旧会话或排队任务。
+
+Demo 仅支持 zh-CN，其他语言返回 422 / `demo_language_unsupported`，不会切换真实计费模式。术语字典可含 `target_language`，无标签默认 zh-CN：`{"source":"기억","target":"memory","target_language":"en"}`。单独原文热词仍用于 ASR，翻译只使用匹配目标语言的词对。
+
+`session.state` ready 与 `translation.partial/final`、`segment.updated` 带会话目标语言。缺少语言字段的历史事件只兼容 zh-CN；前端拒绝不匹配语言的译文而不改写原文。翻译 outbox payload 关联 `segment_id, source_revision, target_language`；预览缓存 digest 包含官方 `target_lang`。
+
+### 传输与恢复
 
 `/ws/sessions/{session_id}?after_seq=最后已处理的持久化序号`，需要登录Cookie和合法Origin。连接成功只恢复记录，不开启麦克风。
 

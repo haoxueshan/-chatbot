@@ -9,8 +9,9 @@ import type { ASRLanguageMode } from "./asrLanguages";
 
 export function useLive(session: Session, onSaved: () => void, audioOptions: AudioInputOptions = {}) {
   const [transcript, setTranscript] = useState(() =>
-    initialTranscript(session.id, session.segments, session.unconfirmed_segments),
+    initialTranscript(session.id, session.segments, session.unconfirmed_segments, session.target_language),
   );
+  const [translationTarget, setTranslationTarget] = useState<Session["target_language"]>();
   const [connection, setConnection] = useState("连接中");
   const [active, setActive] = useState(false);
   const [preparing, setPreparing] = useState(false);
@@ -187,6 +188,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
               total.current = e.captured_ms ?? total.current;
               setElapsed(total.current);
               started.current = Date.now();
+              setTranslationTarget(e.target_language || "zh-CN");
               setAsrLanguageMode(e.asr_language_mode);
               setAsrAcousticProfile(e.asr_acoustic_profile);
               setAsrEnhancement(e.asr_enhancement);
@@ -410,6 +412,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     notice,
     health,
     asrLanguageMode,
+    translationTarget,
     asrEnhancement,
     setNotice,
     gaps,

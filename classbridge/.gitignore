@@ -11,6 +11,8 @@ __pycache__/
 *.db-shm
 *.db-wal
 data/
+!backend/app/data/
+!backend/app/data/translation_languages.json
 logs/
 .local/
 .tools/

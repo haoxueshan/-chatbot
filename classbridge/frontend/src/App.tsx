@@ -180,6 +180,7 @@ export default function App() {
     kind: string;
     mode: Mode;
     retain_audio: boolean;
+    target_language: import("./lib/translationLanguages").TargetLanguage;
   }) => {
     const result = await post<Session>("/sessions", {
       ...data,
@@ -315,6 +316,7 @@ export default function App() {
           close={() => setNewKind(null)}
           submit={create}
           defaultRetain={preferences.retain_audio}
+          defaultTarget={preferences.target_language || "zh-CN"}
           retention={preferences.audio_retention_days}
         />
       )}

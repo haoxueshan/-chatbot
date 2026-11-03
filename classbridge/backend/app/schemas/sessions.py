@@ -1,5 +1,6 @@
 from typing import Literal
 from pydantic import BaseModel, Field
+from app.services.translation_languages import SupportedTargetLanguage
 
 
 class CreateSession(BaseModel):
@@ -7,6 +8,7 @@ class CreateSession(BaseModel):
     kind: Literal['classroom', 'meeting', 'interview'] = 'classroom'
     mode: Literal['demo', 'real'] = 'demo'
     retain_audio: bool = False
+    target_language: SupportedTargetLanguage = 'zh-CN'
 
 
 class ExportRequest(BaseModel):

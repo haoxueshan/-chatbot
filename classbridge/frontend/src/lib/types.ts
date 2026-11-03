@@ -1,3 +1,4 @@
+import type { TargetLanguage } from "./translationLanguages";
 export type Mode = "demo" | "real";
 export type Page = "home" | "session" | "library" | "settings";
 export interface User {
@@ -25,6 +26,7 @@ export interface SourceState {
   latency?: Segment["latency"];
 }
 export interface TranslationState {
+  target_language?: TargetLanguage;
   sentence_id: string;
   stream_id: string;
   text: string;
@@ -39,6 +41,7 @@ export interface TranslationState {
   latency?: Segment["latency"];
 }
 export interface Segment {
+  target_language?: TargetLanguage;
   source_status?: SourceStatus;
   translation_status?: TranslationStatus;
   translation_error?: string;
@@ -83,6 +86,7 @@ export interface Stage {
   }[];
 }
 export interface Session {
+  target_language?: TargetLanguage;
   id: string;
   title: string;
   kind: string;
@@ -177,7 +181,7 @@ export interface Preferences {
   retain_audio: boolean;
   audio_retention_days: number;
   terms: (string | Record<string, string>)[];
-  target_language?: string;
+  target_language?: TargetLanguage;
   real_ready?: boolean;
   configuration_error?: { code: string; message: string } | null;
   model_status?: string;

@@ -31,15 +31,19 @@ async def translate(db,task):
     if not row:return {'skipped':'source_deleted'}
     latest=db.query(SegmentRevision).filter_by(session_id=row.session_id,sentence_id=row.sentence_id).order_by(SegmentRevision.source_revision.desc()).first()
     if latest.id!=row.id or latest.status!='final':return {'skipped':'superseded_source'}
-    if db.query(Translation).filter_by(segment_id=row.id).first():return {'skipped':'translation_already_saved'}
     session=db.get(Session,row.session_id)
+    from app.services.translation_languages import target_code,target_name,translation_terms
+    language=target_code(session.target_language)
+    if task.payload.get('target_language',language)!=language or task.payload.get('source_revision',row.source_revision)!=row.source_revision:
+        raise ValueError('翻译任务语言或原文版本与会话不一致')
+    if db.query(Translation).filter_by(segment_id=row.id,target_language=language).first():return {'skipped':'translation_already_saved'}
     if session.mode=='demo':return {'skipped':'demo_translation_committed_atomically'}
     user=db.get(User,session.user_id)
     terms=(user.settings or {}).get('terms',[])
     reused=None
     if settings.incremental_translation_enabled:
         from app.services.incremental_translation import translation_spec,validated_reuse
-        reused=validated_reuse(task.payload.get('preview_candidate'),row,translation_spec(settings,terms),now())
+        reused=validated_reuse(task.payload.get('preview_candidate'),row,translation_spec(settings,terms,language),now())
     import time
     translated='';first=None;last_emit=0
     source_id=row.id;source_created=row.created_at.replace(tzinfo=timezone.utc) if row.created_at.tzinfo is None else row.created_at
@@ -52,7 +56,7 @@ async def translate(db,task):
         if reused is not None:
             yield reused
         else:
-            kwargs={'terms':terms}
+            kwargs={'terms':translation_terms(terms,language),'target_lang':target_name(language)}
             if settings.incremental_translation_enabled:kwargs['require_complete']=True
             async for delta in AliyunProvider().translate_stream(row.text,**kwargs):yield delta
     async for delta in output():
@@ -82,7 +86,7 @@ async def translate(db,task):
       'translation_final_ms':source_delay+source_wait+elapsed,'translation_queue_ms':queue_wait,
       **model_timing,'translation_reused':reused is not None,'translation_clock':'server_estimate_from_source_audio_end',
       'translation_queue_clock':'wall_task_created_to_attempt_start','translation_queue_clock_skew':clock_skew}
-    save_translation(db,row.id,translated)
+    save_translation(db,row.id,translated,target_language=language)
     db.commit()
     return {'segment_id':row.id,'reused':reused is not None,'translation_queue_ms':queue_wait,**model_timing}
 
