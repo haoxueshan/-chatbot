@@ -668,7 +668,10 @@ export function SessionView({
                 </div>
                 {showOriginal && (
                   <p className="source-text" lang="und">
-                    {s.text || "等待原文…"}
+                    {!s.source_final && s.stable_preview !== undefined ? <>
+                      <span className="stable-source-preview" title="相对稳定预览，仍可被识别服务修订">{s.stable_preview}</span>
+                      <span className="unstable-source-tail" title="正在变化的原文">{s.unstable_tail}</span>
+                    </> : s.text || "等待原文…"}
                   </p>
                 )}
                 <p
@@ -683,7 +686,7 @@ export function SessionView({
                 </p>
                 {s.translation && !s.translation_final && (
                   <small className="temporary-label">
-                    临时译文 · 会随原文修订
+                    {s.preview_source_text ? "临时中文预览 · 仅对应已翻译部分，可被替换" : "临时译文 · 会随原文修订"}
                   </small>
                 )}
                 {s.provenance === "user_correction" && <button className="text-button" onClick={() => void jumpEvidence(s.sentence_id, s.source_revision - 1)}>
@@ -900,7 +903,7 @@ export function SessionView({
         <div className="latency-strip">
           {session.mode === "demo"
             ? "模拟时序（非真实延迟）："
-            : "实测：原文首字距语音起点；其余距语音终点"}
+            : "服务端测量（不含浏览器绘制）：原文/预览首字距语音起点；正式结果距语音终点；排队/模型为独立耗时"}
           {Object.entries(live.latency)
             .filter(
               ([key, value]) =>
@@ -909,6 +912,10 @@ export function SessionView({
                   "source_final_ms",
                   "translation_first_ms",
                   "translation_final_ms",
+                  "preview_first_ms",
+                  "translation_queue_ms",
+                  "translation_model_first_ms",
+                  "translation_model_final_ms",
                 ].includes(key) && typeof value === "number",
             )
             .map(([key, value]) => (
@@ -919,6 +926,10 @@ export function SessionView({
                     source_final_ms: "原文定稿",
                     translation_first_ms: "译文首字",
                     translation_final_ms: "译文定稿",
+                    preview_first_ms: "临时中文首字",
+                    translation_queue_ms: "后台排队",
+                    translation_model_first_ms: "模型首字耗时",
+                    translation_model_final_ms: "模型完成耗时",
                   } as Record<string, string>
                 )[key] || key}{" "}
                 {Math.max(0, Math.round(Number(value)))}ms

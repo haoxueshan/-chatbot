@@ -535,6 +535,27 @@ test("subtitle tabs, side collapse, focus and snapshot refresh do not recreate t
   assert.equal(socket.closed, true);
 });
 
+test("incremental subtitle DOM separates reversible source and mutable Chinese without reopening capture", async () => {
+  const view = await mount(h(SessionView, { session: { ...lesson, mode: "real" }, preferences,
+    onActivity() {}, refresh() {}, back() {}, notify() {}, openSession() {}, deleted() {} }));
+  const socket = Socket.instances.at(-1)!;
+  await act(async () => socket.open());
+  const base = { session_id: "lesson", stream_id: "s", sentence_id: "1", source_revision: 1,
+    translation_revision: 1, event_seq: 0, start_ms: 0, end_ms: 1000, mode: "real" };
+  await act(async () => socket.event({ ...base, type: "transcript.partial", event_id: "p",
+    text: "오늘은 RAG 배웁니다.", stable_preview: "오늘은 RAG ", unstable_tail: "배웁니다." }));
+  assert.equal(view.container.querySelector(".stable-source-preview")?.textContent, "오늘은 RAG ");
+  assert.equal(view.container.querySelector(".unstable-source-tail")?.textContent, "배웁니다.");
+  await act(async () => socket.event({ ...base, type: "translation.partial", event_id: "t",
+    translation: "今天学习 RAG", preview_source_text: "오늘은 RAG", preview_request_id: 1, preview_complete: true }));
+  assert.match(view.container.textContent!, /临时中文预览/);
+  await act(async () => socket.event({ ...base, type: "transcript.final", event_id: "f", event_seq: 1,
+    source_revision: 2, text: "오늘은 RAG 배웁니다." }));
+  assert.equal(view.container.querySelector(".unstable-source-tail"), null);
+  assert.equal(Socket.instances.length, 1);
+  assert.equal(socket.sent.filter(x => x.type === "start").length, 0);
+});
+
 test("App ignores stale session reads and restores hash when back navigation is blocked by capture", async () => {
   let release: (data: Response) => void = () => {};
   const normal = globalThis.fetch;

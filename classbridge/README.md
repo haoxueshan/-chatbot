@@ -82,6 +82,8 @@ RAG 使用原文与文档块，SQL权限过滤后进行关键词/向量混合召
 
 ## 测试
 
+增量翻译方案 A 的默认关闭试验开关、稳定前缀、后台调度、安全复用及实际 Mock 基准见 [ASR_INCREMENTAL_TRANSLATION.md](docs/ASR_INCREMENTAL_TRANSLATION.md)。缺少人工标注课堂音频时，不将回放延迟视为真实识别准确率或课堂性能提升。
+
 ```powershell
 Push-Location backend
 ../.venv/Scripts/python.exe -m pytest -q

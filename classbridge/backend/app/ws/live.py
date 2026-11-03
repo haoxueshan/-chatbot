@@ -177,6 +177,7 @@ class LiveCapture:
         level=[(energy,count) for at,energy,count in self.level_window if stamp-at<=1]
         rms=math.sqrt(sum(e for e,_ in level)/sum(n for _,n in level)) if level else 0
         return {'queue_frames':self.queue.qsize(),'queued_audio_ms':self.queued_bytes//32,
+                'preview_metrics':{**self.preview.metrics,'stable_rollbacks':self.preview.prefix.rollbacks} if self.preview else None,
                 'received_audio_ms':self.received_audio_ms,
                 'last_audio_age_ms':int((stamp-self.last_audio_at)*1000) if self.last_audio_at is not None else None,
                 'input_dbfs':round(20*math.log10(max(rms,1)/32768),1),

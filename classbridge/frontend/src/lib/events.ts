@@ -6,6 +6,7 @@ export interface TranscriptState {
   lastSeq: number;
   clearedSeq: number;
   closedStreams: string[];
+  activeStream?: string;
 }
 export const identity = (s: Pick<Segment, "stream_id" | "sentence_id">) =>
   `${s.stream_id}:${s.sentence_id}`;
@@ -45,6 +46,15 @@ export function applyEvent(
   if (event.type === "session.state") {
     if (event.cleared)
       return { ...next, segments: {}, clearedSeq: event.event_seq };
+    if (event.stream_id && ["preparing", "recording"].includes(event.state || event.status || "")) {
+      // Durable historic control events may be replayed out of order. Never let
+      // an older control event restore a previous live preview stream.
+      if (event.event_seq > 0 && event.event_seq < state.lastSeq) return next;
+      const segments = { ...state.segments };
+      for (const [key, value] of Object.entries(segments))
+        if (!value.source_final && value.stream_id !== event.stream_id) delete segments[key];
+      return { ...next, activeStream: event.stream_id, segments };
+    }
     if (
       event.stream_id &&
       ["stopped", "failed"].includes(event.state || event.status || "")
@@ -104,6 +114,9 @@ export function applyEvent(
     sentence_id: event.sentence_id,
   });
   const old = state.segments[key];
+  if (event.type.endsWith(".partial") && !event.source_status && state.activeStream && event.stream_id !== state.activeStream)
+    return next;
+  if (event.preview_source_text !== undefined && old?.source_final) return next;
   const revision = event.source_revision || 1;
   if (old && revision < old.source_revision) return next;
   // A larger provisional revision is still provisional. Only a stable source
@@ -137,6 +150,15 @@ export function applyEvent(
           status: "partial",
           mode: event.mode || "demo",
         };
+  // Preserve only a completed result for an explicitly identified source prefix.
+  // A rewritten prefix immediately drops it; never freeze a Chinese character LCP.
+  if (event.type === "transcript.partial" && old && revision > old.source_revision &&
+      old.preview_complete && old.preview_source_text &&
+      event.stable_preview !== undefined && event.text?.startsWith(old.preview_source_text)) {
+    value.translation = old.translation;
+    value.preview_source_text = old.preview_source_text;
+    value.preview_complete = true;
+  }
   if (event.status === "retired")
     return {
       ...next,
@@ -155,7 +177,25 @@ export function applyEvent(
     if (event.event_seq && event.event_seq < (value.source_event_seq || 0))
       return next;
     if (event.text !== undefined) value.text = event.text;
-    if (event.type !== "transcript.partial") value.source_final = true;
+    if (event.type === "transcript.partial") {
+      const stable = event.stable_preview;
+      if (stable !== undefined && value.text.startsWith(stable) &&
+          stable + (event.unstable_tail || "") === value.text) {
+        value.stable_preview = stable;
+        value.unstable_tail = event.unstable_tail;
+        value.hypothesis_revision = event.hypothesis_revision;
+      } else {
+        value.stable_preview = undefined;
+        value.unstable_tail = undefined;
+      }
+    } else {
+      value.source_final = true;
+      value.stable_preview = undefined;
+      value.unstable_tail = undefined;
+      value.preview_source_text = undefined;
+      value.preview_request_id = undefined;
+      value.preview_complete = undefined;
+    }
     value.source_event_seq = event.event_seq || value.source_event_seq;
   }
   if (
@@ -163,6 +203,12 @@ export function applyEvent(
     (event.type === "segment.updated" && event.translation !== undefined)
   ) {
     const tr = event.translation_revision || 1;
+    const preview = event.preview_source_text !== undefined;
+    if (preview && (!value.text || !value.text.startsWith(event.preview_source_text!) ||
+        (event.preview_request_id || 0) < (value.preview_request_id || 0))) return next;
+    const replacementPreview = preview && (event.preview_request_id || 0) > (value.preview_request_id || 0);
+    if (preview && value.preview_complete && !replacementPreview &&
+        event.preview_request_id === value.preview_request_id && !event.preview_complete) return next;
     if (
       tr < value.translation_revision ||
       (value.translation_final && event.type === "translation.partial")
@@ -172,12 +218,22 @@ export function applyEvent(
       return next;
     if (
       event.type === "translation.partial" &&
+      !replacementPreview &&
       tr === value.translation_revision &&
       (event.translation?.length || 0) < value.translation.length
     )
       return next;
     value.translation_revision = tr;
     if (event.translation !== undefined) value.translation = event.translation;
+    if (preview) {
+      value.preview_source_text = event.preview_source_text;
+      value.preview_request_id = event.preview_request_id;
+      value.preview_complete = !!event.preview_complete;
+    } else {
+      value.preview_source_text = undefined;
+      value.preview_request_id = undefined;
+      value.preview_complete = undefined;
+    }
     if (event.type !== "translation.partial") value.translation_final = true;
     value.translation_event_seq =
       event.event_seq || value.translation_event_seq;
@@ -195,6 +251,7 @@ export function applyEvent(
       event.snapshot_seq || value.suggestion_event_seq;
   }
   if (event.provenance) value.provenance = event.provenance;
+  if (event.latency) value.latency = { ...value.latency, ...event.latency };
   value.speaker = event.speaker ?? value.speaker;
   value.end_ms = event.end_ms ?? value.end_ms;
   value.status = value.translation_final

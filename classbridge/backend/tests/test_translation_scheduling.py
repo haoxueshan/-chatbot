@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import time
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -161,3 +162,48 @@ def test_celery_priority_and_duplicate_dispatch_bound(factory,monkeypatch):
     tasks.dispatch_outbox();tasks.dispatch_outbox()
     assert [c['args'][0] for c in calls]==ids
     assert [c['priority'] for c in calls]==[0,6]
+
+
+@pytest.mark.asyncio
+async def test_live_completed_preview_flows_through_outbox_and_formal_save(factory,monkeypatch):
+    from app.ws.live import LiveCapture
+    from app.services.incremental_translation import PreviewBudget
+    monkeypatch.setattr(settings,'incremental_translation_enabled',True)
+    calls=[]
+    async def provider(self,text,**kwargs):calls.append(text);yield '今天学习。'
+    monkeypatch.setattr('app.providers.aliyun.AliyunProvider.translate_stream',provider)
+    with factory() as db:seed(db,mode='real')
+    capture=LiveCapture(AsyncMock(),'lesson','alice')
+    capture.mode='real';capture.stream_id='stream';capture.started=time.monotonic()
+    event={'sentence_id':'1','text':'오늘 공부합니다.','start_ms':0,'end_ms':1000,'final':False}
+    await capture.consume(event)
+    capture.preview.budget=PreviewBudget()
+    capture.preview.sentences['stream:1'].first_at-=3
+    capture.preview.tick()
+    for _ in range(4):await asyncio.sleep(0)
+    assert capture.preview.sentences['stream:1'].completed
+    await capture.consume({**event,'final':True})
+    with factory() as db:
+        task=db.query(ProcessingTask).filter_by(kind='translate').one()
+        assert task.payload['preview_candidate']['source_revision']==2
+        tid=task.id
+        assert db.query(Translation).count()==0 # durable worker still owns final publication
+    await tasks.execute_task(tid)
+    with factory() as db:
+        assert db.query(Translation).one().text=='今天学习。'
+        assert db.query(Event).filter_by(type='translation.final').count()==1
+    assert calls==['오늘 공부합니다.']
+    await capture.preview.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_delivery_claims_one_paid_translation(factory,monkeypatch):
+    monkeypatch.setattr(settings,'incremental_translation_enabled',True)
+    tid,_=prepare(factory)
+    calls=[]
+    async def model(self,text,**kwargs):
+        calls.append(text);await asyncio.sleep(.02);yield '正式译文'
+    monkeypatch.setattr('app.providers.aliyun.AliyunProvider.translate_stream',model)
+    await asyncio.gather(tasks.execute_task(tid),tasks.execute_task(tid))
+    assert len(calls)==1
+    with factory() as db:assert db.query(Translation).count()==1

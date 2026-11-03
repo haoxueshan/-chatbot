@@ -20,6 +20,12 @@ export interface Segment {
   mode: Mode;
   source_final?: boolean;
   translation_final?: boolean;
+  stable_preview?: string;
+  unstable_tail?: string;
+  hypothesis_revision?: number;
+  preview_source_text?: string;
+  preview_request_id?: number;
+  preview_complete?: boolean;
   source_event_seq?: number;
   translation_event_seq?: number;
   speaker?: string | null;

@@ -21,7 +21,7 @@
 - `source_first_ms`：服务端第一条原文到达，距音频 start_ms 的估计值。
 - `source_final_ms`：服务端定稿到达，距音频 end_ms 的估计值。
 - `translation_queue_ms`：任务 created_at 到当前执行尝试开始，使用 UTC 墙钟；包括重试等待，跨进程需要校时。负值归零且 `translation_queue_clock_skew=true`，不能据此证明时钟准确。
-- `translation_model_first_ms` / `translation_model_final_ms`：同进程 monotonic 模型请求首个文本/结束耗时。
+- `translation_model_first_ms` / `translation_model_final_ms`：同进程 monotonic 测得 MT 请求至首个文本/正常结束耗时，包含 HTTP、流消费和期间的事件写入，不是云端纯推理耗时。
 - `translation_first_ms` / `translation_final_ms`：source_final 延迟 + 原文保存至执行的墙钟间隔 + 模型耗时，是服务端音频终点参考估计，**不包含事件发布轮询、网络和浏览器绘制耗时**。
 
 不记录课堂原文/译文或密钥到诊断日志。现有业务数据库按原有私有存储规则保存正式内容。
@@ -65,3 +65,73 @@ MT 试验请求要求明确 `[DONE]` 或正常 `finish_reason=stop`；断流或 
 ## 真实效果限制
 
 用户确认没有人工标注音频。因此真实课堂首次原文/中文与定稿 P50/P95、韩语 CER、英语 WER、术语正确率以及实际 API 账单变化均待验证；不能将 Mock 回放结果当作真实模型质量或成本提升。
+
+## 第四阶段：前端兼容与回归
+
+新增可选字段 `stable_preview`、`unstable_tail`、`hypothesis_revision` 描述当前原文预览；正式 `source_revision` 仍由原有 consume 流程分配，不使用本地假设编号代替。`translation.partial` 可携带 `preview_source_text`、`preview_request_id`、`preview_complete`，只表示该原文前缀的完整临时翻译，不是正式中文。
+
+前端将稳定原文与变化尾部分色显示，明确标注临时中文可变。只有完整临时结果且对应的原文前缀仍完全相同时，才跨原文尾部增长保留显示，避免每次增词都闪成空白。新请求可将旧中文整体替换为更短文本，不冻结中文字符前缀。原文重写立即清除不兼容的译文；较旧请求/版本、旧 stream 的临时事件和已完成预览的迟到 token 不再覆盖当前显示。正式事件清除预览元数据，时间戳、版本、引用、历史和自动跟随保留。
+
+计时栏区分音频参考估计、后台排队和模型请求耗时，不称为浏览器端端到端延迟。`capture.health.diagnostics.preview_metrics` 提供当前 stream 的 requests/cancelled/failed/suppressed/stable_rollbacks 计数，不包含文本、密钥或音频。
+
+### 固定事件回放（合成数据）
+
+运行 `python tests/benchmark_incremental_replay.py`：提取基线 consume，与新链路回放同一批人工构造的韩语、英语、混合改写假设；使用虚拟时钟、50ms 驱动步长和固定 450ms Mock MT。没有读取录音，没有调用付费服务。source_first_ms 均为固定输入的 100ms，原文定稿时刻也固定，两条路径完全相同。
+
+| 回放 | 基线中文预览首字 (ms，音频起点参考) | 试验预览首字 | 基线/试验临时请求数 | 试验稳定预览回退 |
+| --- | ---: | ---: | --- | ---: |
+| 韩语 | 2550 | 2150 | 2 / 1 | 0 |
+| 英语 | 定稿前没有有效预览 | 950 | 2 / 2 | 0 |
+| 韩英混合且原文改写 | 1750 | 950 | 2 / 2 | 1 |
+
+输入的原文定稿相对音频起点分别为 2700/2300/2800ms；脚本不模拟正式 MT 完成耗时，因此没有填造正式中文 P50/P95。三组合计临时请求 6→5，仅说明该固定负载的请求数；真实成本还取决于输入/输出 token、取消计费、预览后是否可复用以及云端价格。另有真实数据库集成测试验证完全匹配预览只调用一次 Mock MT，正式后台任务使用缓存；不匹配时重新翻译。没有把这两种测试当成真实账单节省比例。
+
+### 参数
+
+配置在服务端 `.env` 或 PyCharm 后端环境变量，名称均为大写，不放入 `VITE_*`。示例已加入 `.env.example`，本次没有修改用户真实 `.env`。
+
+| 环境变量 | 默认值 | 含义 |
+| --- | --- | --- |
+| `INCREMENTAL_TRANSLATION_ENABLED` | false | 试验开关，保留旧路径 |
+| `PREVIEW_MIN_STABLE_SECONDS` | 0.35 | 一致完整词最小存续时间 |
+| `PREVIEW_INTERVAL_SECONDS` | 1.2 | 同句临时请求最小间隔 |
+| `PREVIEW_MAX_WAIT_SECONDS` | 2.4 | 无新有效候选时的边界文本回退等待；预算耗尽时仍暂缓 |
+| `PREVIEW_MIN_WORDS` | 3 | 稳定候选词数启发式；并非韩语语义保证 |
+| `PREVIEW_MIN_CHANGE_CHARS` | 6 | 减少极小增量重翻 |
+| `PREVIEW_MAX_CHARS` | 2048 | 每个预览假设上限，正式原文不截断 |
+| `PREVIEW_MAX_SENTENCES` | 64 | 每个 capture 的未定稿预览上限 |
+| `PREVIEW_TTL_SECONDS` | 30 | 无文本变化的缓存过期时间 |
+| `PREVIEW_CONCURRENCY` | 1 | API 进程内所有会话的临时并发预算 |
+| `PREVIEW_CALLS_PER_MINUTE` | 20 | 同一 API 进程临时请求窗口限额，取消也计数 |
+| `PREVIEW_REUSE_TTL_SECONDS` | 15 | 完整临时结果的正式复用期限 |
+| `TRANSLATION_POLL_SECONDS` | 0.1 | 试验本地 worker 唤醒丢失的兜底轮询 |
+| `TRANSLATION_EMIT_SECONDS` | 0.25 | 试验翻译首 token 后的事件发布间隔 |
+
+试用：在独立测试配置设置 `INCREMENTAL_TRANSLATION_ENABLED=true`，重启 API 与 worker；Celery 部署还须重启 beat。用原有前端连接进行短会话测试。关闭开关并重启相同服务即可回退，不需要数据库迁移。修改期限/并发参数前先比较固定回放，不能假定阈值越小效果越好。不得在录音中途重启服务。
+
+### 已执行命令
+
+工作目录 `classbridge/backend`，使用现有 `.venv/Scripts/python.exe`；测试用临时数据库和 Mock Provider，进程内清空 DASHSCOPE_API_KEY，未修改配置文件：
+
+```powershell
+../.venv/Scripts/python.exe -m pytest -q
+../.venv/Scripts/python.exe tests/benchmark_translation_scheduler.py
+../.venv/Scripts/python.exe tests/benchmark_incremental_replay.py
+```
+
+在 `classbridge/frontend`：`npm test`、`npm run typecheck`、`npm run build`。前端最终 **51 passed / 0 failed**，含新增 5 项事件归并测试和 1 项 React DOM 预览渲染测试；原有采音、重采样、连接、停止、历史、设置与路由测试保留。生产构建成功：CSS 58.63 kB / JS 294.22 kB（gzip 11.97 / 93.60 kB）。
+
+后端最终完整回归：开关关闭 **146 passed / 0 failed，20.30s**；开关开启 **146 passed / 0 failed，20.31s**。两次测试各自使用隔离临时数据库。新增测试文件：`test_stable_prefix.py`、`test_incremental_translation.py`、`test_translation_scheduling.py`、`test_translation_stream_completion.py`。已覆盖 1 万句缓存上限、韩英词尾/重写、重复/迟到事件、两捕获共享预算、定稿/重连清理、有限重试、事务通知、重复执行、预览经 Outbox 正式保存、RAG 不索引预览和响应结束协议。
+
+`git diff --check` 已通过；对基线检查 AudioWorklet、`audio.ts`、`liveConnection.ts`、ASR options、RAG knowledge、models 和 migrations 的差异为空。ASR Provider 的音频协议部分没有修改；MT Provider 只增加可选的响应完整性检查，不改变发出的请求结构。
+
+额外限制：尚未实际验证多副本全局限流、真实 Celery/Redis 优先级负载、实体 Safari、真实麦克风及公网部署。预览是猜测性工作，有些短句可能比旧策略更晚出现中文或增加费用；必须保持试验开关和回退路径。单机本地 worker 预留翻译槽也可能减慢索引/总结，不能声称所有后台任务都会更快。
+
+## 提交记录
+
+1. `9cc4be8` — 延迟测量与 Stable Prefix Processor。
+2. `c5d6b34` — 临时翻译调度优化。
+3. `3d186c3` — 正式任务优先调度与安全复用。
+4. `feat(subtitles): render reversible previews and verify incremental translation` — 前端状态与完整回归。本报告随第四次提交交付，其 SHA 通过 `git log -1 --format=%H` 获取，并在最终回复记录（提交内容不能嵌入自身 SHA）。
+
+分支未合并 main、未推送。执行 `git log -5 --oneline` 可同时查看四个阶段及原始基线。
