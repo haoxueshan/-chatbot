@@ -9,6 +9,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.models import ProcessingTask, Outbox, Session, SegmentRevision, AudioAsset, RecognitionStream, User, now
 from app.services.events import emit, save_translation, save_final, enqueue, latest_segments
+from app.services.translation_timing import TranslationTiming, wall_queue_ms
 
 logger=logging.getLogger('classbridge.tasks')
 celery_app=Celery('classbridge',broker=settings.redis_url,backend=settings.redis_url)
@@ -32,12 +33,14 @@ async def translate(db,task):
     if session.mode=='demo':return {'skipped':'demo_translation_committed_atomically'}
     user=db.get(User,session.user_id)
     import time
-    started=time.monotonic();translated='';first=None;last_emit=0
+    timing=TranslationTiming();translated='';first=None;last_emit=0
     source_id=row.id;source_created=row.created_at.replace(tzinfo=timezone.utc) if row.created_at.tzinfo is None else row.created_at
-    queue_wait=max(0,int((now()-source_created).total_seconds()*1000))
+    execution_time=now()
+    queue_wait,clock_skew=wall_queue_ms(task.created_at,execution_time)
+    source_wait,_=wall_queue_ms(source_created,execution_time)
     db.commit()
     async for delta in AliyunProvider().translate_stream(row.text,terms=(user.settings or {}).get('terms',[])):
-        if first is None:first=int((time.monotonic()-started)*1000)
+        timing.token();first=timing.first
         translated+=delta
         if time.monotonic()-last_emit>=.15:
             db.expire_all();source=db.get(SegmentRevision,source_id)
@@ -55,11 +58,12 @@ async def translate(db,task):
     if not translated.strip():
         from app.providers.aliyun import ProviderError
         raise ProviderError('format_error','翻译服务未返回文本，原文已保留。')
-    elapsed=int((time.monotonic()-started)*1000)
+    model_timing=timing.finish();elapsed=model_timing['translation_model_final_ms']
     source_delay=max(0,int(row.latency.get('source_final_ms',0)))
-    row.latency={**row.latency,'translation_first_ms':source_delay+queue_wait+(first or 0),
-      'translation_final_ms':source_delay+queue_wait+elapsed,'translation_queue_ms':queue_wait,
-      'translation_model_first_ms':first,'translation_model_final_ms':elapsed,'translation_clock':'source_audio_end'}
+    row.latency={**row.latency,'translation_first_ms':source_delay+source_wait+(first or 0),
+      'translation_final_ms':source_delay+source_wait+elapsed,'translation_queue_ms':queue_wait,
+      **model_timing,'translation_clock':'server_estimate_from_source_audio_end',
+      'translation_queue_clock':'wall_task_created_to_attempt_start','translation_queue_clock_skew':clock_skew}
     save_translation(db,row.id,translated)
     db.commit()
     return {'segment_id':row.id}
