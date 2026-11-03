@@ -47,6 +47,33 @@ class LiveCapture:
         self.asr_acoustic_profile='far'
         self.asr_enhancement={}
         self.received_audio_ms=0;self.last_audio_at=None;self.level_window=deque(maxlen=50)
+        self.preview=None
+
+    def ensure_preview(self):
+        if not settings.incremental_translation_enabled or self.mode!='real':return None
+        if self.preview is None:
+            from app.providers.aliyun import AliyunProvider
+            from app.services.incremental_translation import IncrementalTranslator, translation_spec
+            with SessionLocal() as db:
+                user=db.get(User,self.user_id)
+                terms=(user.settings or {}).get('terms',[]) if user else []
+            self.preview=IncrementalTranslator(settings,self.stream_id,translation_spec(settings,terms),
+                AliyunProvider(),self.publish_preview)
+        return self.preview
+
+    async def publish_preview(self,sid,revision,start,end,translated,metadata):
+        if sid in self.finalized or self.current_revisions.get(sid)!=revision:return
+        first_at=metadata.pop('preview_first_at')
+        latency={key:metadata.pop(key) for key in ('preview_model_first_ms','preview_model_final_ms')}
+        latency['preview_first_ms']=max(0,int((first_at-self.started)*1000)-(start-self.offset))
+        latency['preview_clock']='server_estimate_from_source_audio_start'
+        await self.transient('translation.partial',sentence_id=sid,source_revision=revision,translation_revision=revision,
+            start_ms=start,end_ms=end,translation=translated,status='partial',latency=latency,**metadata)
+
+    async def preview_loop(self):
+        while True:
+            await asyncio.sleep(.1)
+            if self.preview and not self.stopping:self.preview.tick()
 
     async def send(self,payload):
         async with self.send_lock: await self.ws.send_json(payload)
@@ -75,6 +102,7 @@ class LiveCapture:
             self.ready=False;self.request_id=request_id
             self.asr_metrics={};self.failure_reported=False
             self.received_audio_ms=0;self.last_audio_at=None;self.level_window.clear()
+            self.preview=None
             self.capture_ended=None;self.last_backlog_check=0
             self.queue=asyncio.Queue(maxsize=settings.audio_max_queue_frames)
             self.queued_bytes=0
@@ -252,13 +280,27 @@ class LiveCapture:
             self.finalized.add(sid)
             self.final_results.add(fingerprint)
             if sid in self.translation_tasks:self.translation_tasks[sid].cancel()
+            preview_entry=self.preview.finalize(sid) if self.preview else None
+            preview_latency={}
+            if preview_entry and preview_entry.first_output_at is not None:
+                preview_latency={'preview_first_ms':max(0,int((preview_entry.first_output_at-self.started)*1000)-int(event.get('start_ms') or 0)),
+                    'preview_clock':'server_estimate_from_source_audio_start'}
             with SessionLocal() as db:
                 save_final(db,self.session_id,self.stream_id,sid,revision,text,start,max(start,end),
                     latency={'source_first_ms':max(0,int((self.first_seen[sid]-self.started)*1000)-int(event.get('start_ms') or 0)),
-                             'source_final_ms':max(0,int((stamp-self.started)*1000)-int(event.get('end_ms') or 0))})
+                             'source_final_ms':max(0,int((stamp-self.started)*1000)-int(event.get('end_ms') or 0)),**preview_latency})
         else:
-            await self.transient('transcript.partial',sentence_id=sid,source_revision=revision,translation_revision=0,start_ms=start,end_ms=max(start,end),text=text,status='partial')
-            if len(text)>=12 and stamp-self.last_translation.get(sid,0)>=1.2:
+            preview=self.ensure_preview()
+            fields={}
+            if preview:
+                state=preview.update(sid,revision,text,start,end)
+                fields={'stable_preview':state.stable_preview,'unstable_tail':state.unstable_tail,
+                    'hypothesis_revision':state.hypothesis_revision}
+            await self.transient('transcript.partial',sentence_id=sid,source_revision=revision,translation_revision=0,start_ms=start,end_ms=max(start,end),text=text,status='partial',
+                latency={'source_first_ms':max(0,int((self.first_seen[sid]-self.started)*1000)-int(event.get('start_ms') or 0))},**fields)
+            if preview:
+                preview.tick()
+            elif len(text)>=12 and stamp-self.last_translation.get(sid,0)>=1.2:
                 self.last_translation[sid]=stamp
                 old=self.translation_tasks.get(sid)
                 if old:old.cancel()
@@ -282,6 +324,7 @@ class LiveCapture:
     async def run(self):
         periodic=asyncio.create_task(self.periodic_summary())
         health=asyncio.create_task(self.report_health())
+        preview_timer=asyncio.create_task(self.preview_loop()) if settings.incremental_translation_enabled and self.mode=='real' else None
         try:
             if self.mode=='demo':
                 await self.mark_ready()
@@ -313,6 +356,10 @@ class LiveCapture:
             periodic.cancel()
             health.cancel()
             await asyncio.gather(periodic,health,return_exceptions=True)
+            if preview_timer:
+                preview_timer.cancel()
+                await asyncio.gather(preview_timer,return_exceptions=True)
+            if self.preview:await self.preview.close()
             for t in self.translation_tasks.values():t.cancel()
             await asyncio.gather(*self.translation_tasks.values(),return_exceptions=True)
             self.translation_tasks.clear()
