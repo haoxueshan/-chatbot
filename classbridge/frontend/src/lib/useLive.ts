@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AudioCapture, type AudioInputOptions, type AudioQuality, type AppliedAudioSettings } from "./audio";
+import { AudioCapture, audioBufferFits, type AudioInputOptions, type AudioQuality, type AppliedAudioSettings } from "./audio";
 import { connectLive } from "./liveConnection";
 import { isCurrentCaptureEvent } from "./captureEvents";
 import { applyEvent, initialTranscript, orderedSegments } from "./events";
@@ -66,18 +66,23 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     total.current += started.current ? Date.now() - started.current : 0;
     started.current = 0;
     setElapsed(total.current);
-    if (ws.current?.readyState === WebSocket.OPEN && startSent.current) {
-      if (reason)
-        ws.current.send(
-          JSON.stringify({ type: "capture.gap", reason, duration_ms: null }),
-        );
-      setSettling(true);
-      ws.current.send(JSON.stringify({ type: "stop" }));
-    } else if (!startSent.current) {
+    const hadStarted = startSent.current;
+    startSent.current = false;
+    if (ws.current?.readyState === WebSocket.OPEN && hadStarted) {
+      try {
+        if (reason)
+          ws.current.send(JSON.stringify({ type: "capture.gap", reason, duration_ms: null }));
+        ws.current.send(JSON.stringify({ type: "stop" }));
+        setSettling(true);
+      } catch {
+        setSettling(false);
+        reason ||= "录音已停止，但连接中断，未能发送停止指令；服务端将清理断开的采集。";
+        ws.current.close();
+      }
+    } else if (!hadStarted) {
       captureRequest.current = null;
       activeStream.current = null;
     }
-    startSent.current = false;
     if (reason) setNotice(reason);
     void wake.current?.release();
     wake.current = null;
@@ -343,11 +348,12 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
               stop("连接断开，已停止采集");
               return;
             }
-            if (socket.bufferedAmount > 64000) {
-              stop("音频发送积压超过 2 秒，已停止采集，防止继续积累延迟");
+            if (!audioBufferFits(socket.bufferedAmount, frame.byteLength)) {
+              stop("音频发送积压将超过 2 秒，当前帧尚未发送，已停止采集");
               return;
             }
-            socket.send(frame);
+            try { socket.send(frame); }
+            catch { stop("音频发送失败，当前帧未确认发送，已停止采集"); }
           },
           (rms, quality) => { setLevel(rms); setInputPeak(quality?.input_peak ?? 0); setAudioQuality(quality); },
           stop,

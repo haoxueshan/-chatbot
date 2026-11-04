@@ -27,6 +27,50 @@ async def test_missing_key_refuses_every_paid_entry_without_fallback():
         assert error.value.code == "missing_api_key"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('final_count',[1,100])
+async def test_slow_consumer_does_not_pause_upstream_read_or_pcm_send(monkeypatch,final_count):
+    task='a'*32;sent=[];finished=asyncio.Event();final_read=asyncio.Event();bounded=asyncio.Event();closed=[]
+    monkeypatch.setattr(module.uuid,'uuid4',lambda:SimpleNamespace(hex=task))
+    class Socket:
+        index=0
+        async def send(self,value):
+            sent.append(value)
+            if isinstance(value,str) and json.loads(value)['header']['action']=='finish-task':finished.set()
+        async def recv(self):
+            self.index+=1
+            if self.index==1:return json.dumps({'header':{'event':'task-started','task_id':task}})
+            if self.index<=final_count+2:
+                final=self.index>=3
+                if final:final_read.set()
+                if self.index==67:bounded.set()
+                return json.dumps({'header':{'event':'result-generated','task_id':task},'payload':{'output':{'sentence':{'sentence_id':max(1,self.index-2),'text':'evidence','sentence_end':final,'begin_time':0,'end_time':40}}}})
+            await finished.wait()
+            return json.dumps({'header':{'event':'task-finished','task_id':task}})
+    class Context:
+        async def __aenter__(self):return Socket()
+        async def __aexit__(self,*args):closed.append(True)
+    monkeypatch.setattr(module,'connect',lambda *a,**k:Context())
+    frames=[i.to_bytes(2,'little')*320 for i in range(10)]
+    async def audio():
+        for frame in frames:yield frame
+    metrics={};stream=AliyunProvider(config()).stream_asr(audio(),metrics=metrics)
+    first=await anext(stream)
+    assert not first['final']
+    # Deliberately do not request the next yield until socket read/send finished.
+    await asyncio.wait_for(final_read.wait(),1)
+    await asyncio.wait_for(finished.wait(),1)
+    if final_count==100:
+        await asyncio.wait_for(bounded.wait(),1)
+        # 64 queued finals + one fetched/being decoded in the reader + partial.
+        assert 65<=metrics['transcript_events']<=66
+    rest=[e async for e in stream]
+    assert len(rest)==final_count and all(e['final'] for e in rest)
+    assert [e['sentence_id'] for e in rest]==[str(i) for i in range(1,final_count+1)]
+    assert [v for v in sent if isinstance(v,bytes)]==frames
+    assert metrics['sent_audio_ms']==200 and closed==[True]
+
+
 @pytest.mark.parametrize("status,code,expected", [(401,"InvalidApiKey","authentication_failed"),(403,"AccessDenied","model_permission"),(402,"","quota_exhausted"),(429,"Throttling","rate_limited"),(504,"","timeout"),(400,"InvalidParameter","format_error"),(400,"InvalidWorkspace","region_mismatch"),(404,"ModelNotFound","model_unavailable")])
 def test_error_categories_are_safe(status, code, expected):
     error = classify_error(status, code)

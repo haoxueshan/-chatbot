@@ -9,6 +9,26 @@ import certifi
 _contexts = {}
 _lock = threading.Lock()
 
+# PCM16LE, mono, 16 kHz: 32 bytes/ms, 640 bytes per 20 ms frame.
+PCM_BYTES_PER_MS = 32
+PCM_FRAME_BYTES = 640
+PCM_QUEUE_BYTES = 2000 * PCM_BYTES_PER_MS
+
+
+async def blocking_call(function, *args):
+    """Join an in-flight blocking operation before cleanup closes its resources.
+
+    Callers create/close DB sessions INSIDE function, never across threads.
+    Only ordered transactions, batches or fixed maintenance loops use this.
+    """
+    task = asyncio.create_task(asyncio.to_thread(function, *args))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # A write failure must remain visible even if cleanup requested cancel.
+        await task
+        raise
+
 
 def _load_context(key):
     with _lock:

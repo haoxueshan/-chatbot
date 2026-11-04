@@ -1,4 +1,5 @@
 import time
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,6 +8,37 @@ from test_core import factory, seed
 from app.config import settings
 from app.models import Event, Outbox, ProcessingTask, SegmentRevision
 from app.ws.live import LiveCapture
+
+
+@pytest.mark.asyncio
+async def test_blocked_preview_does_not_block_final_and_failure_drains(factory,monkeypatch):
+    from app.providers.aliyun import AliyunProvider
+    with factory() as db:seed(db,mode='real')
+    partial_sent=asyncio.Event();release=asyncio.Event();final_saved=asyncio.Event()
+    class Socket:
+        async def send_json(self,payload):
+            partial_sent.set();await release.wait();raise RuntimeError('mock browser disconnected')
+    c=LiveCapture(Socket(),'lesson','alice');c.stream_id='stream';c.mode='real'
+    async def provider(self,audio,**kwargs):
+        await kwargs['on_ready']()
+        yield {'sentence_id':'1','text':'partial','start_ms':0,'end_ms':100,'final':False}
+        await partial_sent.wait()
+        yield {'sentence_id':'1','text':'official','start_ms':0,'end_ms':200,'final':True}
+        final_saved.set()
+        async for _ in audio:pass
+        # Final received during graceful failure drain must also persist.
+        yield {'sentence_id':'2','text':'drained final','start_ms':200,'end_ms':300,'final':True}
+    monkeypatch.setattr(AliyunProvider,'stream_asr',provider)
+    c.task=asyncio.create_task(c.run())
+    await asyncio.wait_for(final_saved.wait(),2)
+    with factory() as db:assert db.query(SegmentRevision).one().text=='official'
+    assert not c.task.done()
+    release.set();await asyncio.wait_for(c.task,3)
+    with factory() as db:
+        assert db.query(SegmentRevision).count()==2
+        errors=db.query(Event).filter_by(type='processing.failed').all()
+        assert len(errors)==1 and errors[0].payload['code']=='subtitle_delivery_failed'
+    assert not c.delivery_pending and not c.translation_tasks and c.delivery is None
 
 
 @pytest.mark.asyncio

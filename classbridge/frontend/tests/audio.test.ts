@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PCMResampler } from "../public/audio/pcm.js";
-import { AudioCapture, captureConstraints } from "../src/lib/audio.ts";
+import { PCMResampler, PCMFramer } from "../public/audio/pcm.js";
+import { AudioCapture, captureConstraints, audioBufferFits } from "../src/lib/audio.ts";
+
+test("20ms packetizer preserves every sample and reset removes old tail",()=>{
+  const framer=new PCMFramer();const frames:ArrayBuffer[]=[];
+  const samples=Int16Array.from({length:320*100+17},(_,i)=>(i%65536)-32768);
+  for(let i=0;i<samples.length;i+=43)framer.push(samples.subarray(i,i+43),(f:ArrayBuffer)=>frames.push(f));
+  assert.equal(frames.length,100);assert.equal(framer.used,17);
+  const restored=frames.flatMap(f=>{assert.equal(f.byteLength,640);const v=new DataView(f);return Array.from({length:320},(_,i)=>v.getInt16(i*2,true));});
+  assert.deepEqual(restored,Array.from(samples.subarray(0,32000)));
+  framer.reset();assert.equal(framer.used,0);
+  framer.push(new Int16Array(320),(f:ArrayBuffer)=>assert.ok(new Int16Array(f).every(x=>x===0)));
+});
+test("browser two-second byte budget includes unsent current frame",()=>{
+  assert.equal(audioBufferFits(63360,640),true);
+  assert.equal(audioBufferFits(63361,640),false);
+  assert.equal(audioBufferFits(64000,640),false);
+  assert.equal(audioBufferFits(32000,32000),true);
+});
 
 function signal(rate: number, hz: number, seconds = 1) {
   return Float32Array.from(

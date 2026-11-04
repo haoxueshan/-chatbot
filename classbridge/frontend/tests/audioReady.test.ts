@@ -17,7 +17,7 @@ test("a slow upstream startup creates no PCM backlog until the worklet is enable
   const channels = [new Float32Array(128).fill(.1)];
   for (let i = 0; i < 2000; i++) processor.process([channels], [[new Float32Array(128)]]);
   assert.equal(messages.filter((m) => m.type === "frame").length, 0);
-  assert.equal(processor.pending.length, 0);
+  assert.equal(processor.framer.used, 0);
   assert.ok(messages.some((m) => m.type === "level"));
   processor.port.onmessage({ data: { type: "begin" } });
   for (let i = 0; i < 100; i++) processor.process([channels], [[new Float32Array(128)]]);

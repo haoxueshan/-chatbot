@@ -160,6 +160,51 @@ afterEach(async () => {
 });
 after(async () => dom.happyDOM.close());
 
+for (const failure of ["backpressure", "closed", "send-throws"]) {
+  test(`audio ${failure} releases capture once and rejects late frames`, async () => {
+    const { useLive } = await import("../src/lib/useLive.ts");
+    const { AudioCapture } = await import("../src/lib/audio.ts");
+    const originalStart = AudioCapture.prototype.start, originalStop = AudioCapture.prototype.stop;
+    let onFrame!: (frame: ArrayBuffer) => void, stopped = 0, state!: ReturnType<typeof useLive>;
+    AudioCapture.prototype.start = async function (callback) { onFrame = callback; };
+    AudioCapture.prototype.stop = function () { stopped++; };
+    function Probe() { state = useLive(other, () => {}); return null; }
+    try {
+      await mount(h(Probe));
+      const socket = Socket.instances.at(-1)! as Socket & { bufferedAmount: number };
+      await act(async () => socket.open());
+      await act(async () => state.start());
+      const request = socket.sent.find(e => e.type === "start").request_id;
+      await act(async () => socket.event({type:"session.state",session_id:other.id,stream_id:"current",request_id:request,event_seq:1,state:"recording",ready:true}));
+      socket.bufferedAmount = 63360;
+      const send = socket.send.bind(socket);
+      let frames = 0, controls = 0;
+      socket.send = ((data: string | ArrayBuffer) => {
+        if (data instanceof ArrayBuffer) {
+          if (failure === "send-throws") throw new Error("mock audio write failed");
+          frames++; socket.bufferedAmount += data.byteLength;
+        } else {
+          controls++;
+          if (failure === "send-throws") throw new Error("mock control write failed");
+          send(data);
+        }
+      }) as typeof socket.send;
+      if (failure === "closed") socket.readyState = 3;
+      await act(async () => { onFrame(new ArrayBuffer(640)); onFrame(new ArrayBuffer(640)); onFrame(new ArrayBuffer(640)); });
+      assert.equal(state.active, false);
+      assert.equal(stopped, 1);
+      assert.equal(frames, failure === "backpressure" ? 1 : 0);
+      assert.equal(controls, failure === "backpressure" ? 2 : failure === "send-throws" ? 1 : 0);
+      if (failure === "send-throws") assert.equal(socket.closed, true);
+      await act(async () => state.stop());
+      assert.equal(stopped, 1);
+    } finally {
+      AudioCapture.prototype.start = originalStart;
+      AudioCapture.prototype.stop = originalStop;
+    }
+  });
+}
+
 test("settings save and restore a selectable default without clearing tagged terms", async () => {
   let saved:any;
   const original={...preferences,terms:[...preferences.terms,{source:"기억",target:"memory",target_language:"en"}]};

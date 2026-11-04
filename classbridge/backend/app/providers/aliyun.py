@@ -228,6 +228,7 @@ class AliyunProvider:
         metrics = metrics if metrics is not None else {}
         metrics.update(sent_audio_ms=0, send_wait_ms=0)
         finish_sent = False
+        finish_started = False
         try:
             async with connect(self.base("ws"), additional_headers=headers, open_timeout=self.timeout, close_timeout=5, max_size=2**20, max_queue=32, ping_interval=20) as ws:
                 await ws.send(json.dumps(message))
@@ -241,7 +242,7 @@ class AliyunProvider:
                     await on_ready()
 
                 async def send_audio():
-                    nonlocal finish_sent
+                    nonlocal finish_sent, finish_started
                     async for frame in audio:
                         if not frame or len(frame) % 2 or len(frame) > 32000:
                             raise ProviderError("format_error", "PCM 帧须为单声道 16 kHz int16，且不超过一秒。")
@@ -252,14 +253,18 @@ class AliyunProvider:
                             raise ProviderError('upstream_send_timeout','向阿里云发送音频超时，采集已停止；请检查服务器网络后重试。') from exc
                         metrics['send_wait_ms']=int((time.monotonic()-stamp)*1000)
                         metrics['last_send_monotonic']=time.monotonic()
-                        metrics['sent_audio_ms']+=len(frame)//32
+                        metrics['sent_audio_ms']+=len(frame)/32
                         # Buffered browser packets must not starve response handling.
                         await asyncio.sleep(0)
-                    finish_sent=True
+                    finish_started=True
                     await asyncio.wait_for(ws.send(json.dumps({"header": {"action": "finish-task", "task_id": task_id, "streaming": "duplex"}, "payload": {"input": {}}})),self.timeout)
+                    finish_sent=True
 
-                sender = asyncio.create_task(send_audio())
-                try:
+                results=asyncio.Queue(maxsize=64)
+                # 64 bounded ASR messages; consumer DB/UI latency no longer
+                # prevents reading the next upstream message in the usual case.
+                async def receive_results():
+                    nonlocal receiver
                     while True:
                         receiver=asyncio.create_task(ws.recv())
                         if not sender.done():
@@ -277,6 +282,7 @@ class AliyunProvider:
                         if event == "task-failed":
                             raise classify_error(0, header.get("error_code", ""))
                         if event == "task-finished":
+                            if finish_started:await asyncio.wait_for(asyncio.shield(sender),self.timeout)
                             if not finish_sent:
                                 raise ProviderError('upstream_ended_early','识别服务提前结束了当前任务；已保存字幕保留，请手动重新开始。')
                             break
@@ -287,11 +293,25 @@ class AliyunProvider:
                             continue
                         metrics['last_transcript_monotonic']=time.monotonic()
                         metrics['transcript_events']=metrics.get('transcript_events',0)+1
-                        yield {"sentence_id": str(sentence["sentence_id"]), "text": sentence["text"], "start_ms": int(sentence.get("begin_time") or 0), "end_ms": sentence.get("end_time"), "final": bool(sentence.get("sentence_end")), "words": sentence.get("words", [])}
+                        await results.put({"sentence_id": str(sentence["sentence_id"]), "text": sentence["text"], "start_ms": int(sentence.get("begin_time") or 0), "end_ms": sentence.get("end_time"), "final": bool(sentence.get("sentence_end")), "words": sentence.get("words", [])})
+
+                sender=asyncio.create_task(send_audio())
+                reader=asyncio.create_task(receive_results())
+                pending=None
+                try:
+                    while True:
+                        if reader.done():
+                            while not results.empty():yield results.get_nowait()
+                            reader.result();break
+                        pending=asyncio.create_task(results.get())
+                        done,_=await asyncio.wait((pending,reader),return_when=asyncio.FIRST_COMPLETED)
+                        if pending in done:
+                            value=pending.result();pending=None
+                            yield value
+                        else:
+                            pending.cancel();await asyncio.gather(pending,return_exceptions=True);pending=None
                 finally:
-                    # Cancel children BEFORE closing the socket. Shutdown errors must
-                    # not replace the original failure or caller cancellation.
-                    tasks=[task for task in (sender,receiver) if task is not None]
+                    tasks=[task for task in (sender,reader,receiver,pending) if task is not None]
                     for task in tasks:task.cancel()
                     await asyncio.gather(*tasks,return_exceptions=True)
         except InvalidStatus as exc:

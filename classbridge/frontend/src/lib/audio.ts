@@ -6,6 +6,12 @@ export interface AudioInputOptions {
 export type AppliedAudioSettings = Pick<MediaTrackSettings,"echoCancellation"|"noiseSuppression"|"autoGainControl"|"sampleRate"|"channelCount">;
 export interface AudioQuality { input_peak:number; peak_window_ms:number; possible_clipping:boolean; }
 
+// PCM16LE mono 16 kHz: 32 bytes/ms; budget includes the frame about to send.
+export const PCM_QUEUE_BYTES = 2000 * 32;
+export function audioBufferFits(bufferedBytes: number, frameBytes: number): boolean {
+  return bufferedBytes + frameBytes <= PCM_QUEUE_BYTES;
+}
+
 // A/B selection: "natural" disables *browser* processing, not the microphone's
 // hardware DSP. Never add a local noise gate, which can remove quiet syllables.
 export function captureConstraints(options: AudioInputOptions = {}): MediaStreamConstraints {
@@ -97,6 +103,7 @@ export class AudioCapture {
     });
     this.stream = null;
     this.node?.disconnect();
+    if (this.node) this.node.port.onmessage = null;
     this.node = null;
     const context = this.context;
     this.context = null;

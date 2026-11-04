@@ -1,4 +1,20 @@
 // Continuous, low-pass windowed-sinc resampling; no MIME relabelling.
+// Fixed 20 ms packetizer; no pending.push/splice or per-sample array movement.
+export class PCMFramer {
+  constructor() { this.reset(); }
+  reset() { this.frame = new ArrayBuffer(640); this.view = new DataView(this.frame); this.used = 0; }
+  push(samples, emit) {
+    for (let i = 0; i < samples.length; i++) {
+      this.view.setInt16(this.used * 2, samples[i], true);
+      if (++this.used === 320) {
+        const frame = this.frame;
+        this.reset();
+        emit(frame);
+      }
+    }
+  }
+}
+
 export class PCMResampler {
   constructor(inputRate, outputRate = 16000) {
     this.step = inputRate / outputRate;
