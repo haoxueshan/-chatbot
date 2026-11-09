@@ -78,6 +78,11 @@ class PreviewBudget:
 preview_budget = PreviewBudget()
 
 
+def worth_refresh(previous, text, elapsed, settings):
+    return (not text.startswith(previous) or len(text)-len(previous)>=settings.preview_min_change_chars
+            or bool(re.search(r'[.!?。！？]$',text)) or elapsed>=settings.preview_max_wait_seconds)
+
+
 @dataclass
 class Sentence:
     text: str
@@ -138,8 +143,9 @@ class IncrementalTranslator:
             # labelled with preview_source_text. A rewrite invalidates it immediately.
             if entry.requested_text and not text.startswith(entry.requested_text):
                 self._cancel(entry)
-                entry.completed = None
-            entry.updated_at = stamp
+                entry.requested_text = ''
+            if entry.completed and not text.startswith(entry.completed['text']):entry.completed=None
+        entry.updated_at = stamp
         entry.text, entry.revision = text, revision
         entry.start_ms, entry.end_ms = start_ms, end_ms
         self.sentences.move_to_end(sentence_id)
@@ -178,14 +184,12 @@ class IncrementalTranslator:
                 continue
             if stamp - entry.last_request_at < self.settings.preview_interval_seconds:
                 continue
-            if (entry.requested_text and text.startswith(entry.requested_text)
-                and len(text) - len(entry.requested_text) < self.settings.preview_min_change_chars
-                and stamp - entry.last_request_at < self.settings.preview_max_wait_seconds):
+            if entry.requested_text and (entry.requested_text.startswith(text) or
+                not worth_refresh(entry.requested_text,text,stamp-entry.last_request_at,self.settings)):
                 continue
-            # Cancel only when a replacement is worth requesting. The done callback
-            # retains the admission slot until cancellation actually completes.
+            # Compatible growth waits for this finite request to finish. Rewrites
+            # cancel in update(); the admission slot lasts until the task is done.
             if entry.task and not entry.task.done():
-                self._cancel(entry)
                 continue
             if not self.budget.acquire(stamp, self.settings.preview_concurrency, self.settings.preview_calls_per_minute):
                 self.metrics['suppressed'] += 1
@@ -193,7 +197,6 @@ class IncrementalTranslator:
             entry.request_id += 1
             entry.last_request_at = stamp
             entry.requested_text = text
-            entry.completed = None
             entry.attempted.add(digest)
             state = self.prefix.states.get((self.stream_id, sid))
             if state: state.last_translation_time = stamp

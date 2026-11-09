@@ -250,14 +250,32 @@ export function SessionView({
     [documentsOpen, setDocumentsOpen] = useState(false);
   const list = useRef<HTMLDivElement>(null),
     end = useRef<HTMLDivElement>(null);
+  const followingRef = useRef(following);
+  followingRef.current = following;
   useEffect(() => {
     onActivity(live.active || live.settling);
     return () => onActivity(false);
   }, [live.active, live.settling, onActivity]);
   useEffect(() => {
-    if (following && list.current)
-      list.current.scrollTo({ top: list.current.scrollHeight, behavior: "auto" });
-  }, [timeline, following]);
+    const el = list.current;
+    if (!following || !el) return;
+    let frame: number | undefined;
+    const schedule = () => {
+      if (frame !== undefined) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = undefined;
+        if (!followingRef.current) return;
+        const bottom = Math.max(0, el.scrollHeight - el.clientHeight);
+        if (Math.abs(bottom - el.scrollTop) > 1) el.scrollTo({ top: bottom, behavior: "auto" });
+      });
+    };
+    schedule();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(schedule);
+    observer?.observe(el);
+    const latest = end.current?.previousElementSibling;
+    if (latest) observer?.observe(latest);
+    return () => { observer?.disconnect(); if (frame !== undefined) window.cancelAnimationFrame(frame); };
+  }, [timeline, following, showOriginal, tab]);
   useEffect(() => {
     const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
@@ -576,10 +594,10 @@ export function SessionView({
             ref={list}
             onScroll={() => {
               const el = list.current;
-              if (el)
-                setFollowing(
-                  el.scrollHeight - el.scrollTop - el.clientHeight < 80,
-                );
+              if (el) {
+                followingRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                setFollowing(followingRef.current);
+              }
             }}
           >
             {!live.segments.length && (

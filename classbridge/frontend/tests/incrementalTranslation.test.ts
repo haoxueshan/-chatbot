@@ -9,6 +9,59 @@ function e(type: string, fields: Partial<BridgeEvent> = {}): BridgeEvent {
     event_seq: 0, start_ms: 0, end_ms: 1000, mode: "real", ...fields };
 }
 const source = "오늘은 RAG 공부합니다.";
+
+test("equivalent preview preserves view references but consumes event identity", () => {
+  let s = applyEvent(applyEvent(initialTranscript("lesson"), partial()), preview());
+  const before=s.translations;
+  const repeated=preview();s=applyEvent(s,repeated);
+  assert.equal(s.translations,before);
+  assert.ok(s.seen.includes(repeated.event_id));
+});
+
+test("short replacement tokens retain compatible completed preview until complete", () => {
+  let s = applyEvent(applyEvent(initialTranscript("lesson"), partial()), preview());
+  s=applyEvent(s,preview({preview_request_id:2,preview_complete:false,translation:"今"}));
+  assert.equal(orderedSegments(s)[0].translation,"今天学习 RAG。");
+  s=applyEvent(s,preview({preview_request_id:1,translation:"迟到旧请求"}));
+  assert.equal(orderedSegments(s)[0].translation,"今天学习 RAG。");
+  s=applyEvent(s,preview({preview_request_id:2,preview_complete:true,translation:"新译"}));
+  assert.equal(orderedSegments(s)[0].translation,"新译");
+});
+
+test("timestamp revisions retain an in-flight prefix, while real rewrite hides it", () => {
+  let s=applyEvent(applyEvent(initialTranscript('lesson'),partial()),preview({preview_complete:false}));
+  for(let i=2;i<=20;i++){
+    s=applyEvent(s,partial({source_revision:i,end_ms:i*100}));
+    assert.equal(orderedSegments(s)[0].translation,'今天学习 RAG。');
+  }
+  s=applyEvent(s,partial({source_revision:21,text:'어제는 다른 내용을 배웠습니다.'}));
+  assert.equal(orderedSegments(s)[0].translation,'');
+  s=applyEvent(s,preview({source_revision:20,preview_complete:true}));
+  assert.equal(orderedSegments(s)[0].translation,'');
+});
+
+test("identical text must still advance final status and replay sequence", () => {
+  let s=applyEvent(initialTranscript('lesson'),e('transcript.final',{text:source,event_seq:1}));
+  const sources=s.sources;
+  s=applyEvent(s,e('translation.partial',{translation:'same',source_status:'final',event_seq:2}));
+  s=applyEvent(s,e('translation.partial',{translation:'same',source_status:'final',event_seq:3}));
+  assert.equal(s.lastSeq,3);assert.equal(s.translations['stream:1'].translation_event_seq,3);
+  s=applyEvent(s,e('translation.final',{translation:'same',event_seq:4}));
+  assert.equal(orderedSegments(s)[0].translation_final,true);
+  s=applyEvent(s,e('processing.failed',{task_kind:'translate',message:'late',event_seq:5}));
+  assert.equal(s.lastSeq,5);assert.equal(orderedSegments(s)[0].translation_final,true);
+  assert.equal(s.sources,sources);
+});
+
+test("future preview and its fallback stay hidden until the source revision arrives", () => {
+  let s=applyEvent(initialTranscript('lesson'),partial());
+  s=applyEvent(s,preview({source_revision:3,preview_request_id:3}));
+  assert.equal(orderedSegments(s)[0].translation,'');
+  s=applyEvent(s,preview({source_revision:3,preview_request_id:4,preview_complete:false,translation:'今'}));
+  assert.equal(orderedSegments(s)[0].translation,'');
+  s=applyEvent(s,partial({source_revision:3}));
+  assert.equal(orderedSegments(s)[0].translation,'今天学习 RAG。');
+});
 function partial(fields: Partial<BridgeEvent> = {}) {
   return e("transcript.partial", { text: source, stable_preview: "오늘은 RAG ",
     unstable_tail: "공부합니다.", hypothesis_revision: 2, ...fields });

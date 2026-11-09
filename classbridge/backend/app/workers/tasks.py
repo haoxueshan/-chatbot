@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import logging
+import hashlib
 from datetime import datetime, timedelta, timezone
 from celery import Celery
 from sqlalchemy import select, case, and_, or_
@@ -41,11 +42,25 @@ async def translate(db,task):
     user=db.get(User,session.user_id)
     terms=(user.settings or {}).get('terms',[])
     reused=None
-    if settings.incremental_translation_enabled:
-        from app.services.incremental_translation import translation_spec,validated_reuse
-        reused=validated_reuse(task.payload.get('preview_candidate'),row,translation_spec(settings,terms,language),now())
+    from app.services.incremental_translation import translation_spec,validated_reuse,spec_digest
+    spec=translation_spec(settings,terms,language);digest=spec_digest(spec)
+    # A timestamp-only formal correction still gets its own source/translation
+    # versions and events. Reuse only a proven complete, same-spec formal result.
+    prior=db.query(Translation,SegmentRevision).join(SegmentRevision,Translation.segment_id==SegmentRevision.id).filter(
+        SegmentRevision.session_id==row.session_id,SegmentRevision.stream_id==row.stream_id,
+        SegmentRevision.sentence_id==row.sentence_id,SegmentRevision.source_revision<row.source_revision,
+        SegmentRevision.text==row.text,SegmentRevision.status=='final',Translation.target_language==language
+    ).order_by(SegmentRevision.source_revision.desc(),Translation.translation_revision.desc()).first()
+    if prior:
+        previous=db.query(ProcessingTask).filter_by(idempotency_key=f'translate:{prior[1].id}',status='completed').first()
+        proof=(previous.result or {}) if previous else {}
+        if (proof.get('translation_complete') is True and proof.get('translation_spec_digest')==digest
+            and proof.get('translation_text_digest')==hashlib.sha256(prior[0].text.encode()).hexdigest()
+            and prior[0].text.strip()):reused=prior[0].text
+    if reused is None:
+        reused=validated_reuse(task.payload.get('preview_candidate'),row,spec,now())
     import time
-    translated='';first=None;last_emit=0
+    translated='';first=None;last_emit=float('-inf')
     source_id=row.id;source_created=row.created_at.replace(tzinfo=timezone.utc) if row.created_at.tzinfo is None else row.created_at
     execution_time=now()
     queue_wait,clock_skew=wall_queue_ms(task.created_at,execution_time)
@@ -57,13 +72,13 @@ async def translate(db,task):
             yield reused
         else:
             kwargs={'terms':translation_terms(terms,language),'target_lang':target_name(language)}
-            if settings.incremental_translation_enabled:kwargs['require_complete']=True
+            kwargs['require_complete']=True
             async for delta in AliyunProvider().translate_stream(row.text,**kwargs):yield delta
     async for delta in output():
         if not delta:continue
         timing.token();first=0 if reused is not None else timing.first
         translated+=delta
-        if reused is None and time.monotonic()-last_emit>=(settings.translation_emit_seconds if settings.incremental_translation_enabled else .15):
+        if reused is None and time.monotonic()-last_emit>=settings.translation_emit_seconds:
             db.expire_all();source=db.get(SegmentRevision,source_id)
             if not source:return {'skipped':'source_deleted'}
             current=db.query(SegmentRevision).filter_by(session_id=source.session_id,sentence_id=source.sentence_id).order_by(SegmentRevision.source_revision.desc()).first()
@@ -88,7 +103,9 @@ async def translate(db,task):
       'translation_queue_clock':'wall_task_created_to_attempt_start','translation_queue_clock_skew':clock_skew}
     save_translation(db,row.id,translated,target_language=language)
     db.commit()
-    return {'segment_id':row.id,'reused':reused is not None,'translation_queue_ms':queue_wait,**model_timing}
+    return {'segment_id':row.id,'reused':reused is not None,'translation_queue_ms':queue_wait,
+            'translation_spec_digest':digest,'translation_text_digest':hashlib.sha256(translated.encode()).hexdigest(),
+            'translation_complete':True,**model_timing}
 
 
 async def reprocess(db,task):

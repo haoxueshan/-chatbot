@@ -34,6 +34,41 @@ async def flush():
 
 
 @pytest.mark.asyncio
+async def test_compatible_growth_waits_for_running_preview_instead_of_cancelling():
+    release=asyncio.Event()
+    class Slow(Provider):
+        async def translate_stream(self,text,**kwargs):
+            self.calls.append(text);yield '译';await release.wait();yield '文'
+    s,p,clock,events=scheduler(Slow())
+    try:
+        s.update('a',1,'오늘은 인공지능을 공부합니다.',0,1000)
+        clock[0]=3;s.tick();await flush()
+        clock[0]=6;s.update('a',2,'오늘은 인공지능을 공부합니다. 다음 내용을 설명합니다.',0,2000);s.tick();await flush()
+        assert s.metrics['cancelled']==0 and len(p.calls)==1
+        release.set();await flush();s.tick();await flush()
+        assert len(p.calls)==2 and events[-1][-1]['preview_complete']
+    finally:release.set();await s.close()
+
+
+@pytest.mark.asyncio
+async def test_timestamp_liveness_does_not_expire_failed_attempt_or_forge_agreement():
+    class Broken(Provider):
+        async def translate_stream(self,text,**kwargs):
+            self.calls.append(text);raise RuntimeError('mock failure')
+            yield ''
+    s,p,clock,events=scheduler(Broken())
+    try:
+        for i in range(15):
+            clock[0]=i*5
+            s.update('a',i+1,'오늘은 인공지능을 공부합니다.',0,i*100)
+            s.tick();await flush()
+        assert len(p.calls)==1 and s.metrics['failed']==1 and not events
+        assert s.prefix.view('stream','a',clock[0]).hypothesis_revision==1
+        assert s.prefix.view('stream','a',clock[0]).stable_preview==''
+    finally:await s.close()
+
+
+@pytest.mark.asyncio
 async def test_agreement_dedup_compatible_tail_and_timed_fallback():
     s,p,clock,events=scheduler()
     s.update('a',1,'We study neural net',0,500)

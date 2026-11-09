@@ -23,6 +23,75 @@ def prepare(factory,candidate=None):
         return task.id,row.id
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('incremental',[False,True])
+async def test_hundred_tokens_use_configured_cadence_and_keep_first_and_final(factory,monkeypatch,incremental):
+    monkeypatch.setattr(settings,'incremental_translation_enabled',incremental)
+    monkeypatch.setattr(settings,'translation_emit_seconds',.25)
+    tid,sid=prepare(factory);clock=[100.];first=[]
+    monkeypatch.setattr(time,'monotonic',lambda:clock[0])
+    async def model(self,text,**kwargs):
+        for i in range(100):
+            clock[0]=100+i*.01
+            yield str(i%10)
+            if i==0:
+                with factory() as db:first.extend(e.payload['translation'] for e in db.query(Event).filter_by(type='translation.partial'))
+    monkeypatch.setattr('app.providers.aliyun.AliyunProvider.translate_stream',model)
+    await tasks.execute_task(tid)
+    with factory() as db:
+        events=db.query(Event).filter_by(type='translation.partial').order_by(Event.event_seq).all()
+        print({'incremental':incremental,'formal_partials':len(events)})
+        assert len(events)==4 and first==['0']
+        assert len({e.payload['translation'] for e in events})==len(events)
+        assert db.query(Translation).one().text==''.join(str(i%10) for i in range(100))
+        assert db.query(Event).filter_by(type='translation.final').count()==1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('incremental',[False,True])
+async def test_timestamp_final_revision_reuses_exact_completed_translation(factory,monkeypatch,incremental):
+    monkeypatch.setattr(settings,'incremental_translation_enabled',incremental)
+    tid,sid=prepare(factory);calls=[]
+    async def model(self,text,**kwargs):calls.append(text);yield '完整译文'
+    monkeypatch.setattr('app.providers.aliyun.AliyunProvider.translate_stream',model)
+    await tasks.execute_task(tid)
+    with factory() as db:
+        save_final(db,'lesson','stream','stream:1',3,'Hello world.',0,1500)
+        row=db.query(SegmentRevision).filter_by(source_revision=3).one()
+        tid2=db.query(ProcessingTask).filter_by(idempotency_key=f'translate:{row.id}').one().id
+    await tasks.execute_task(tid2)
+    assert calls==['Hello world.']
+    with factory() as db:
+        assert db.query(Translation).count()==2
+        events=db.query(Event).filter_by(type='translation.final').order_by(Event.event_seq).all()
+        assert [e.payload['source_revision'] for e in events]==[2,3]
+        assert events[-1].payload['end_ms']==1500
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mismatch',['spec','incomplete','missing_proof','text','language','translation'])
+async def test_formal_reuse_requires_content_language_spec_and_completion(factory,monkeypatch,mismatch):
+    from app.models import Session
+    tid,sid=prepare(factory);calls=[]
+    async def model(self,text,**kwargs):calls.append((text,kwargs['target_lang']));yield 'translated'
+    monkeypatch.setattr('app.providers.aliyun.AliyunProvider.translate_stream',model)
+    await tasks.execute_task(tid)
+    if mismatch=='spec':monkeypatch.setattr(settings,'translation_model','mock-new-model')
+    with factory() as db:
+        previous=db.get(ProcessingTask,tid)
+        if mismatch=='incomplete':previous.result={**previous.result,'translation_complete':False}
+        if mismatch=='missing_proof':previous.result={}
+        if mismatch=='language':db.get(Session,'lesson').target_language='en'
+        if mismatch=='translation':db.query(Translation).one().text='unverified replacement'
+        db.commit()
+        text='Different source.' if mismatch=='text' else 'Hello world.'
+        save_final(db,'lesson','stream','stream:1',3,text,0,1500)
+        row=db.query(SegmentRevision).filter_by(source_revision=3).one()
+        tid2=db.query(ProcessingTask).filter_by(idempotency_key=f'translate:{row.id}').one().id
+    await tasks.execute_task(tid2)
+    assert len(calls)==2
+
+
 def candidate(text='Hello world.'):
     record={'text':text,'translation':'你好世界。','spec_digest':spec_digest(translation_spec(settings,[])),
         'stream_id':'stream','sentence_id':'stream:1','completed_at':100,'complete':True}
@@ -194,6 +263,29 @@ async def test_live_completed_preview_flows_through_outbox_and_formal_save(facto
         assert db.query(Event).filter_by(type='translation.final').count()==1
     assert calls==['오늘 공부합니다.']
     await capture.preview.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_complete_preview_uses_verified_outbox_final_without_restart(factory,monkeypatch):
+    from app.ws.live import LiveCapture
+    from app.services.incremental_translation import PreviewBudget
+    monkeypatch.setattr(settings,'incremental_translation_enabled',False)
+    monkeypatch.setattr('app.services.incremental_translation.preview_budget',PreviewBudget())
+    calls=[]
+    async def provider(self,text,**kwargs):calls.append(text);yield '完整译文'
+    monkeypatch.setattr('app.providers.aliyun.AliyunProvider.translate_stream',provider)
+    with factory() as db:seed(db,mode='real')
+    capture=LiveCapture(AsyncMock(),'lesson','alice');capture.mode='real';capture.stream_id='stream';capture.started=time.monotonic()
+    event={'sentence_id':'1','text':'오늘은 인공지능을 공부합니다.','start_ms':0,'end_ms':1000}
+    await capture.consume(event)
+    await asyncio.gather(*capture.translation_tasks.values())
+    await capture.consume({**event,'final':True})
+    with factory() as db:tid=db.query(ProcessingTask).filter_by(kind='translate').one().id
+    await tasks.execute_task(tid)
+    assert calls==[event['text']]
+    with factory() as db:
+        assert db.query(Translation).one().text=='完整译文'
+        assert db.query(Event).filter_by(type='translation.final').count()==1
 
 
 @pytest.mark.asyncio

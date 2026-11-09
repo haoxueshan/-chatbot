@@ -42,6 +42,7 @@ class LiveCapture:
         self.stream_id=None;self.mode=None;self.offset=0;self.started=0;self.task=None
         self.stopping=False;self.current_revisions={};self.finalized=set();self.last_results={};self.final_results=set();self.translation_tasks={}
         self.last_translation={};self.first_seen={};self.audio_file=None;self.audio_path=None;self.audio_id=None;self.audio_bytes=0
+        self.legacy_inputs={}
         self.send_lock=asyncio.Lock()
         self.last_backlog_check=0;self.capture_ended=None;self.queued_bytes=0
         self.ready=False;self.request_id=None;self.captured_before=0
@@ -101,6 +102,7 @@ class LiveCapture:
         while True:
             await asyncio.sleep(.1)
             if self.preview and not self.stopping:self.preview.tick()
+            elif not self.stopping and not settings.incremental_translation_enabled:self.tick_legacy()
 
     async def send(self,payload):
         async def locked_send():
@@ -210,6 +212,7 @@ class LiveCapture:
             self.archive_queue.clear();self.archive_bytes=0
             self.delivery_pending.clear();self.delivery_failed=None;self.preview_terms=None
             self.current_revisions={};self.finalized=set();self.last_results={};self.final_results=set();self.first_seen={};self.last_translation={}
+            self.legacy_inputs.clear()
             self.audio_id=None;self.audio_bytes=0
             stream=RecognitionStream(id=self.stream_id,session_id=row.id,status='preparing',offset_ms=self.offset,mode=self.mode)
             db.add(stream);db.flush();row.active_stream_id=self.stream_id;row.status='preparing'
@@ -362,7 +365,43 @@ class LiveCapture:
             self.queued_frames=max(0,self.queued_frames-1)
             yield item
 
-    async def partial_translation(self,sentence_id,revision,text,start_ms,end_ms):
+    def update_legacy(self,sid,revision,text,start,end):
+        from app.services.incremental_translation import Sentence
+        stamp=time.monotonic()
+        entry=self.legacy_inputs.get(sid)
+        if entry is None:
+            entry=Sentence(text,revision,start,end,stamp,stamp);self.legacy_inputs[sid]=entry
+        elif entry.requested_text and not text.startswith(entry.requested_text):
+            entry.request_id+=1;entry.requested_text=''
+            task=self.translation_tasks.get(sid)
+            if task and not task.done():task.cancel()
+        entry.text=text;entry.revision=revision;entry.start_ms=start;entry.end_ms=end;entry.updated_at=stamp
+        self.tick_legacy()
+
+    def tick_legacy(self):
+        import hashlib
+        from app.services.incremental_translation import preview_budget,worth_refresh
+        self.translation_tasks={sid:t for sid,t in self.translation_tasks.items() if not t.done()}
+        stamp=time.monotonic()
+        for sid,entry in self.legacy_inputs.items():
+            if self.stopping or sid in self.finalized:continue
+            if stamp-entry.updated_at>settings.preview_ttl_seconds:continue
+            text=entry.text
+            if not text or len(text)>settings.preview_max_chars or len(entry.attempted)>=64:continue
+            digest=hashlib.sha256(text.encode()).hexdigest()
+            if digest in entry.attempted:continue
+            if sid in self.translation_tasks or len(self.translation_tasks)>=2:continue
+            if stamp-entry.last_request_at<settings.preview_interval_seconds:continue
+            if not entry.requested_text and len(text)<12 and stamp-entry.first_at<settings.preview_max_wait_seconds:continue
+            if entry.requested_text and not worth_refresh(entry.requested_text,text,stamp-entry.last_request_at,settings):continue
+            if not preview_budget.acquire(stamp,2,settings.preview_calls_per_minute):continue
+            entry.request_id+=1;entry.last_request_at=stamp;entry.requested_text=text;entry.attempted.add(digest)
+            self.last_translation[sid]=stamp
+            task=asyncio.create_task(self.partial_translation(sid,entry.revision,text,entry.start_ms,entry.end_ms,entry,entry.request_id))
+            self.translation_tasks[sid]=task
+            task.add_done_callback(lambda _:preview_budget.release())
+
+    async def partial_translation(self,sentence_id,revision,text,start_ms,end_ms,entry=None,request_id=None):
         try:
             from app.providers.aliyun import AliyunProvider
             provider=AliyunProvider()
@@ -372,11 +411,31 @@ class LiveCapture:
             terms=await blocking_call(load_terms)
             from app.services.translation_languages import translation_terms,target_name
             language=self.capture_language()
-            async for delta in provider.translate_stream(text,terms=translation_terms(terms,language),target_lang=target_name(language)):
-                if sentence_id in self.finalized or self.current_revisions.get(sentence_id)!=revision:return
+            from app.services.incremental_translation import translation_spec,spec_digest
+            digest=spec_digest(translation_spec(settings,terms,language))
+            last_emit=float('-inf');last_text=''
+            def valid():
+                if sentence_id in self.finalized:return False
+                return (self.legacy_inputs.get(sentence_id) is entry and entry.request_id==request_id and entry.text.startswith(text)) if entry else self.current_revisions.get(sentence_id)==revision
+            async def publish(complete=False):
+                nonlocal last_emit,last_text
+                if not valid() or not translated or (translated==last_text and not complete):return
+                current=entry.revision if entry else revision
+                if entry and entry.first_output_at is None:entry.first_output_at=time.monotonic()
+                await self.transient('translation.partial',sentence_id=sentence_id,source_revision=current,translation_revision=current,
+                    start_ms=entry.start_ms if entry else start_ms,end_ms=entry.end_ms if entry else end_ms,translation=translated,status='partial',
+                    **({'preview_source_text':text,'preview_request_id':request_id,'preview_complete':complete} if entry else {}))
+                last_emit=time.monotonic();last_text=translated
+            async for delta in provider.translate_stream(text,terms=translation_terms(terms,language),target_lang=target_name(language),require_complete=True):
+                if not valid():return
+                if not delta:continue
                 translated+=delta
-                await self.transient('translation.partial',sentence_id=sentence_id,source_revision=revision,translation_revision=revision,
-                    start_ms=start_ms,end_ms=end_ms,translation=translated,status='partial')
+                if len(translated)>settings.preview_max_chars*4:return
+                if time.monotonic()-last_emit>=settings.translation_emit_seconds:await publish()
+            if entry and valid() and translated.strip():
+                entry.completed={'text':text,'translation':translated,'spec_digest':digest,'stream_id':self.stream_id,
+                    'sentence_id':sentence_id,'completed_at':time.monotonic(),'complete':True}
+            await publish(complete=True)
         except asyncio.CancelledError:raise
         except Exception:
             # Final translation task separately reports failures durably. Partial attempts are optional and bounded.
@@ -427,7 +486,8 @@ class LiveCapture:
         stamp=time.monotonic();self.first_seen.setdefault(sid,stamp)
         if final:
             if sid in self.translation_tasks:self.translation_tasks[sid].cancel()
-            preview_entry=self.preview.finalize(sid) if self.preview else None
+            legacy_entry=self.legacy_inputs.pop(sid,None)
+            preview_entry=self.preview.finalize(sid) if self.preview else legacy_entry
             from app.services.incremental_translation import reuse_candidate
             candidate=reuse_candidate(preview_entry,text,revision,settings) if preview_entry else None
             preview_latency={}
@@ -471,13 +531,7 @@ class LiveCapture:
                 latency={'source_first_ms':max(0,int((self.first_seen[sid]-self.started)*1000)-int(event.get('start_ms') or 0))},**fields)
             if preview:
                 preview.tick()
-            elif len(text)>=12 and stamp-self.last_translation.get(sid,0)>=1.2:
-                self.last_translation[sid]=stamp
-                old=self.translation_tasks.get(sid)
-                if old:old.cancel()
-                # At most one translation per sentence; at most two active provisional requests overall.
-                active=[t for t in self.translation_tasks.values() if not t.done()]
-                if len(active)<2:self.translation_tasks[sid]=asyncio.create_task(self.partial_translation(sid,revision,text,start,end))
+            else:self.update_legacy(sid,revision,text,start,end)
 
     async def demo(self):
         for i,(original,translation) in enumerate(DEMO_SENTENCES):
@@ -498,7 +552,7 @@ class LiveCapture:
         self.capture_language()
         periodic=asyncio.create_task(self.periodic_summary())
         health=asyncio.create_task(self.report_health())
-        preview_timer=asyncio.create_task(self.preview_loop()) if settings.incremental_translation_enabled and self.mode=='real' else None
+        preview_timer=asyncio.create_task(self.preview_loop()) if self.mode=='real' else None
         maintenance=asyncio.create_task(self.maintain_capture()) if self.mode=='real' else None
         archive=asyncio.create_task(self.archive_audio()) if self.mode=='real' else None
         self.delivery=asyncio.create_task(self.deliver_previews()) if self.mode=='real' else None
@@ -570,6 +624,7 @@ class LiveCapture:
             for t in self.translation_tasks.values():t.cancel()
             await asyncio.gather(*self.translation_tasks.values(),return_exceptions=True)
             self.translation_tasks.clear()
+            self.legacy_inputs.clear()
             if self.audio_file:
                 saved_audio=False
                 try:

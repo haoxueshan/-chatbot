@@ -12,6 +12,7 @@ export interface SourceState {
   stream_id: string;
   text: string;
   revision: number;
+  text_revision?: number; // last actual source text change, not timestamp-only revision
   status: SourceStatus;
   start_ms: number;
   end_ms: number;
@@ -26,6 +27,7 @@ export interface SourceState {
   latency?: Segment["latency"];
 }
 export interface TranslationState {
+  fallback_preview?: TranslationState; // at most one compatible completed display snapshot
   target_language?: TargetLanguage;
   sentence_id: string;
   stream_id: string;

@@ -106,6 +106,7 @@ export function applySourceEvent(
     stream_id: event.stream_id!,
     text,
     revision,
+    text_revision: old?.text === text ? (old.text_revision ?? old.revision) : revision,
     status,
     start_ms: event.start_ms ?? old?.start_ms ?? 0,
     end_ms: event.end_ms ?? old?.end_ms ?? 0,
@@ -129,6 +130,7 @@ export function applySourceEvent(
       value.hypothesis_revision = event.hypothesis_revision;
     }
   }
+  if (old && JSON.stringify(old) === JSON.stringify(value)) return state;
   return { ...state, sources: { ...state.sources, [key]: value } };
 }
 
@@ -217,6 +219,13 @@ export function applyTranslationEvent(
     error: failed ? event.message : undefined,
     latency: { ...(same ? old.latency : undefined), ...event.latency },
   };
+  // Track the NEW request identity even while a compatible completed preview
+  // remains on screen. Never turn a target-language common prefix into final.
+  const fallback = old?.fallback_preview ?? (old?.preview_complete ? old : undefined);
+  if (preview && !failed && !event.preview_complete && fallback && source?.status === "partial" &&
+      fallback.preview_source_text !== undefined && source.text.startsWith(fallback.preview_source_text) &&
+      value.text.length < fallback.text.length) value.fallback_preview = fallback;
+  if (old && JSON.stringify(old) === JSON.stringify(value)) return state;
   const translations = { ...state.translations, [key]: value };
   // Misordered translation-only messages may wait for sources, but never grow without bound.
   const orphans = Object.keys(translations).filter((k) => !state.sources[k]);
@@ -370,12 +379,13 @@ function visibleTranslation(
   t?: TranslationState,
 ): TranslationState | undefined {
   if (!t || s.status === "interrupted") return undefined;
+  if (t.fallback_preview && s.status === "partial" && t.fallback_preview.source_revision <= s.revision &&
+      s.text.startsWith(t.fallback_preview.preview_source_text!)) return t.fallback_preview;
   if (t.preview_source_text !== undefined) {
     if (s.status !== "partial" || !s.text.startsWith(t.preview_source_text))
       return undefined;
-    return matchesSource(s, t) ||
+    return matchesSource(s, t) || (t.source_revision <= s.revision && t.source_revision >= (s.text_revision ?? s.revision)) ||
       (t.preview_complete &&
-        s.stable_preview !== undefined &&
         t.source_revision < s.revision)
       ? t
       : undefined;

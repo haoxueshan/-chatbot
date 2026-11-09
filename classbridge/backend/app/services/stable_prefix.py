@@ -68,6 +68,7 @@ class StablePrefixProcessor:
             state = Hypothesis(first_update_time=timestamp)
             self.states[key] = state
         if text == state.current_hypothesis and state.revision:
+            state.last_update_time=timestamp # liveness, not independent agreement
             return self.view(stream_id, sentence_id, timestamp)
         words = complete_words(text)
         common = 0

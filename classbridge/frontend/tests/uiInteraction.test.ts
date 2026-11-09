@@ -630,6 +630,45 @@ test("subtitle tabs, side collapse, focus and snapshot refresh do not recreate t
   assert.equal(socket.closed, true);
 });
 
+test("subtitle follow skips unchanged height, follows growth and respects history reading", async () => {
+  const originalRAF=window.requestAnimationFrame, originalCancel=window.cancelAnimationFrame;
+  const originalObserver=globalThis.ResizeObserver,resize=new Set<()=>void>();
+  globalThis.ResizeObserver=class {
+    constructor(public callback:()=>void){resize.add(callback);}
+    observe(){} unobserve(){} disconnect(){resize.delete(this.callback);}
+  } as any;
+  const frames=new Map<number,FrameRequestCallback>();let next=0;
+  window.requestAnimationFrame=(fn)=>{frames.set(++next,fn);return next;};
+  window.cancelAnimationFrame=(id)=>{frames.delete(id);};
+  async function paint(){await act(async()=>{for(const [id,fn] of [...frames]){frames.delete(id);fn(0);}});}
+  try {
+    const view=await mount(h(SessionView,{session:lesson,preferences,onActivity(){},refresh(){},back(){},notify(){},openSession(){},deleted(){}}));
+    const socket=Socket.instances.at(-1)!;await act(async()=>socket.open());
+    const list=view.container.querySelector<HTMLElement>('.subtitle-list')!;
+    let height=1000,top=800,scrolls=0;
+    Object.defineProperties(list,{scrollHeight:{configurable:true,get:()=>height},clientHeight:{configurable:true,get:()=>200},scrollTop:{configurable:true,get:()=>top,set:v=>{top=v;}}});
+    list.scrollTo=((options:ScrollToOptions)=>{scrolls++;top=options.top!;}) as typeof list.scrollTo;
+    const source={session_id:lesson.id,stream_id:'stream',sentence_id:'follow',source_revision:1,event_seq:1,type:'transcript.final',text:'source',event_id:'source'};
+    await act(async()=>socket.event(source));await paint();scrolls=0;
+    for(let i=0;i<20;i++){
+      await act(async()=>socket.event({...source,type:'translation.partial',event_id:`mt-${i}`,event_seq:i+2,source_status:'final',translation:'译文'.repeat(i+1)}));
+      await paint();
+    }
+    console.log({unchangedHeightScrolls:scrolls});assert.equal(scrolls,0);
+    height=1100;
+    for(const callback of resize){callback();callback();}
+    assert.equal(frames.size,1);await paint();assert.equal(scrolls,1);
+    await act(async()=>socket.event({...source,type:'translation.final',event_id:'done',event_seq:30,translation:'完整译文'}));await paint();
+    assert.equal(scrolls,1);assert.equal(top,900);
+    await act(async()=>{top=0;list.dispatchEvent(new Event('scroll'));});
+    height=1200;
+    await act(async()=>socket.event({...source,sentence_id:'next',event_id:'next',event_seq:31}));await paint();
+    assert.equal(scrolls,1);assert.equal(top,0);
+    await click('回到最新');await paint();assert.equal(top,1000);
+    await view.render(null);assert.equal(frames.size,0);assert.equal(resize.size,0);
+  } finally {window.requestAnimationFrame=originalRAF;window.cancelAnimationFrame=originalCancel;globalThis.ResizeObserver=originalObserver;}
+});
+
 test("incremental subtitle DOM separates reversible source and mutable Chinese without reopening capture", async () => {
   const view = await mount(h(SessionView, { session: { ...lesson, mode: "real" }, preferences,
     onActivity() {}, refresh() {}, back() {}, notify() {}, openSession() {}, deleted() {} }));

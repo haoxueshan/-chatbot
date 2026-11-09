@@ -401,7 +401,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
       }
     }
   };
-  const segments = useMemo(() => orderedSegments(transcript), [transcript]);
+  const segments = useMemo(() => orderedSegments(transcript), [transcript.sources, transcript.translations, transcript.targetLanguage]);
   return {
     segments,
     connection,
