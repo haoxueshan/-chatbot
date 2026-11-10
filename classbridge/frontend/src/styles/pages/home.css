@@ -41,7 +41,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 }
 .stat-card {
   padding: 20px 24px;
@@ -149,7 +149,7 @@
 }
 @media (max-width: 1200px) {
   .dashboard-action {
-    padding: 16px;
+    padding: 12px;
     gap: 10px;
   }
   .dashboard-action > svg {

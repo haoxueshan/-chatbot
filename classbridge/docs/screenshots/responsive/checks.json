@@ -1,0 +1,884 @@
+{
+  "checks": [
+    {
+      "label": "home",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "home",
+      "width": 360,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 360,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 360,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 360,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 360,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 360,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 360,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 360,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 360,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 360,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "home",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "home",
+      "width": 430,
+      "height": 932,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 430,
+      "height": 932,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 430,
+      "height": 932,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 430,
+      "height": 932,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 430,
+      "height": 932,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 430,
+      "height": 932,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 430,
+      "height": 932,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 430,
+      "height": 932,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 430,
+      "height": 932,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 430,
+      "height": 932,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "home",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "home",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "home",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "home",
+      "width": 1180,
+      "height": 820,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 1180,
+      "height": 820,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 1180,
+      "height": 820,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 1180,
+      "height": 820,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 1180,
+      "height": 820,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 1180,
+      "height": 820,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 1180,
+      "height": 820,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 1180,
+      "height": 820,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 1180,
+      "height": 820,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 1180,
+      "height": 820,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "home",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "home",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "home",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "settings",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "library",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat composer",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "chat text",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "tools",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "documents dialog",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document preview",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "document text",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "reduced viewport composer",
+      "width": 390,
+      "height": 500,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "long subtitles",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "RTL subtitles",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "landscape visible error",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "landscape capture with error",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "create dialog",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "inViewport": true
+    },
+    {
+      "label": "login",
+      "width": 320,
+      "height": 568,
+      "overflow": false
+    },
+    {
+      "label": "login",
+      "width": 360,
+      "height": 800,
+      "overflow": false
+    },
+    {
+      "label": "login",
+      "width": 390,
+      "height": 844,
+      "overflow": false
+    },
+    {
+      "label": "login",
+      "width": 430,
+      "height": 932,
+      "overflow": false
+    },
+    {
+      "label": "login",
+      "width": 844,
+      "height": 390,
+      "overflow": false
+    },
+    {
+      "label": "login",
+      "width": 768,
+      "height": 1024,
+      "overflow": false
+    },
+    {
+      "label": "login",
+      "width": 1024,
+      "height": 768,
+      "overflow": false
+    },
+    {
+      "label": "login",
+      "width": 1180,
+      "height": 820,
+      "overflow": false
+    },
+    {
+      "label": "login",
+      "width": 1280,
+      "height": 800,
+      "overflow": false
+    },
+    {
+      "label": "login",
+      "width": 1440,
+      "height": 900,
+      "overflow": false
+    },
+    {
+      "label": "login",
+      "width": 1920,
+      "height": 1080,
+      "overflow": false
+    }
+  ],
+  "lifecycle": "same mock WebSocket; one start, no stop across resize/tabs/theme/drawer/sidebar",
+  "native_keyboard_tested": false
+}

@@ -30,6 +30,7 @@
   height: 38px;
   border-radius: 10px;
 }
+.settings-row > * { min-width: 0; max-width: 100%; }
 .settings-row {
   display: flex;
   align-items: center;
@@ -160,6 +161,7 @@
   color: var(--cb-soft);
 }
 .model-table code {
+  overflow-wrap: anywhere;
   font-size: 12px;
   color: var(--cb-muted);
   text-align: right;
@@ -199,20 +201,20 @@
 }
 @media (max-width: 680px) {
   .settings-width {
-    padding: 28px 32px;
+    padding: 16px 12px;
     max-width: 1060px;
   }
   .settings .page-heading .primary {
     font-size: 12px;
     padding: 10px 12px;
-    min-height: 38px;
+    min-height: 44px;
     gap: 6px;
   }
   .settings .page-heading .primary > svg {
     width: 14px;
   }
   .settings-card {
-    padding: 24px;
+    padding: 16px;
     margin-top: 20px;
     border-radius: var(--radius);
   }
@@ -231,7 +233,7 @@
     height: 35px;
   }
   .settings-row {
-    gap: 24px;
+    gap: 12px;
     flex-wrap: wrap;
     padding: 16px 0;
   }
@@ -261,7 +263,7 @@
     font-size: 12px;
   }
   .subtitle-preview p {
-    font-size: 22px;
+    overflow-wrap: anywhere;
   }
   .settings-row .switch {
     margin-left: auto;
@@ -282,6 +284,6 @@
     padding: 12px;
   }
   .terms-label textarea {
-    font-size: 12px;
+    font-size: 16px;
   }
 }

@@ -14,6 +14,7 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { request } from "../lib/api";
+import { Dialog } from "./ui/dialog";
 import type { Document, Mode } from "../lib/types";
 export function Library({
   notify,
@@ -281,13 +282,7 @@ export function DocumentPreview({
       );
   }, [doc, chunkId, page, quote]);
   return (
-    <div className="modal-backdrop">
-      <section
-        className="modal document-preview"
-        role="dialog"
-        aria-modal="true"
-        aria-label="资料来源预览"
-      >
+    <Dialog title="资料来源预览" className="document-preview" close={close}>
         <div className="modal-title">
           <h2>{doc?.name || doc?.filename || "资料来源"}</h2>
           <button className="icon-button" aria-label="关闭预览" onClick={close}>
@@ -349,7 +344,6 @@ export function DocumentPreview({
           <ExternalLink size={15} />
           打开原始文件
         </a>
-      </section>
-    </div>
+    </Dialog>
   );
 }

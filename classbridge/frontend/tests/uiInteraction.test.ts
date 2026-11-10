@@ -630,6 +630,56 @@ test("subtitle tabs, side collapse, focus and snapshot refresh do not recreate t
   assert.equal(socket.closed, true);
 });
 
+test("responsive presentation and tools keep one real-mode capture until explicit stop", async () => {
+  const { AudioCapture } = await import("../src/lib/audio.ts");
+  const originalStart = AudioCapture.prototype.start, originalStop = AudioCapture.prototype.stop;
+  let starts = 0, stops = 0;
+  AudioCapture.prototype.start = async function () { starts++; };
+  AudioCapture.prototype.stop = function () { stops++; };
+  const props = {session:other, preferences, onActivity(){}, refresh(){}, back(){}, notify(){}, openSession(){}, deleted(){}};
+  try {
+    const view = await mount(h(SessionView, props));
+    const socket = Socket.instances.at(-1)!;
+    await act(async () => socket.open());
+    await click("开始录音");
+    const request = socket.sent.find(e=>e.type === "start");
+    await act(async () => socket.event({type:"session.state",session_id:other.id,stream_id:"responsive-stream",request_id:request.request_id,event_seq:1,state:"recording",ready:true}));
+    assert.equal(starts,1);
+    const details = view.container.querySelector<HTMLDetailsElement>('.session-details')!;
+    for(const [width,height] of [[390,844],[844,390],[1024,768],[1440,900]]) {
+      dom.happyDOM.setWindowSize({width,height});
+      await act(async () => { window.dispatchEvent(new Event('resize')); window.dispatchEvent(new Event('orientationchange')); });
+      await act(async () => { details.open=true; });
+      assert.equal(button('删除会话').disabled,true);
+      assert.equal(button('清空').disabled,true);
+      assert.equal(button('本会话资料').disabled,true);
+      await click('切换侧栏');
+      await click('切换专注阅读');
+      await click('切换专注阅读');
+      await act(async () => view.container.querySelectorAll<HTMLButtonElement>('.mobile-tabs button')[2].click());
+      await act(async () => view.container.querySelectorAll<HTMLButtonElement>('.mobile-tabs button')[0].click());
+      await view.render(h(SessionView,{...props,preferences:{...preferences,theme:'dark'}}));
+      await act(async () => details.querySelector('summary')!.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+      assert.equal(details.open,false);
+      assert.equal(document.activeElement,details.querySelector('summary'));
+      assert.equal(Socket.instances.length,1);
+      assert.equal(socket.closed,false);
+      assert.equal(starts,1);
+      assert.equal(stops,0);
+      assert.ok(button('停止录音'));
+    }
+    await click('停止录音');
+    assert.equal(stops,1);
+    assert.equal(socket.sent.filter(e=>e.type==='start').length,1);
+    assert.equal(socket.sent.filter(e=>e.type==='stop').length,1);
+    await view.render(null);
+    assert.equal(socket.closed,true);
+  } finally {
+    AudioCapture.prototype.start=originalStart;
+    AudioCapture.prototype.stop=originalStop;
+  }
+});
+
 test("subtitle follow skips unchanged height, follows growth and respects history reading", async () => {
   const originalRAF=window.requestAnimationFrame, originalCancel=window.cancelAnimationFrame;
   const originalObserver=globalThis.ResizeObserver,resize=new Set<()=>void>();

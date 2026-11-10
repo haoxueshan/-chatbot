@@ -114,7 +114,8 @@
   margin-bottom: 15px;
 }
 .document-preview {
-  width: 760px;
+  width: min(760px, calc(100vw - 24px));
+  height: min(760px, calc(100dvh - 32px));
   display: flex;
   flex-direction: column;
   overflow: hidden;

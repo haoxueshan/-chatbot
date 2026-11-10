@@ -34,6 +34,7 @@ import { asrLanguageLabels } from "../lib/asrLanguages";
 import type { Citation, Preferences, Session, Stage } from "../lib/types";
 import { Chat } from "./Chat";
 import { DocumentPreview, Library } from "./Library";
+import { Dialog } from "./ui/dialog";
 
 function sourceReferences(
   item: unknown,
@@ -376,149 +377,380 @@ export function SessionView({
   return (
     <div className={`session-view ${focus ? "focus-mode" : ""}`}>
       <div className="session-heading">
-        <div>
-          <button
-            className="back-link"
-            onClick={back}
-            disabled={live.active || live.settling}
-          >
-            <ChevronLeft size={14} />
-            全部会话
-          </button>
-          <h1>{session.title}</h1>
-          <div className="session-meta">
-            <span>{formatDate(session.created_at)}</span>
-            <span>·</span>
+        <div className="session-title-group">
+          <h1 title={session.title}>{session.title}</h1>
+          <div className="session-reading-meta">
+            <span className={`badge ${session.mode === "demo" ? "amber" : "blue"}`}>
+              {session.mode === "demo" ? "模拟 · 不调用付费 API" : "真实模式"}
+            </span>
             <span>
               <Languages size={13} />
-              {session.mode === "demo" ? `韩语 / 英语 → ${targetLabel}` : (
-                live.active
-                  ? `当前识别提示：${live.preparing ? "准备中" : live.asrLanguageMode ? asrLanguageLabels[live.asrLanguageMode] : "服务端未报告"} → ${targetLabel}`
-                  : `下次识别提示：${asrLanguageLabels[preferences.asr_language_mode || "auto"]} → ${targetLabel}`
-              )}
-            </span>
-            {live.active && live.translationTarget && <span>服务端目标：{translationLanguageLabel(live.translationTarget)}</span>}
-            <span
-              className={`badge ${session.mode === "demo" ? "amber" : "blue"}`}
-            >
-              {session.mode === "demo" ? "模拟演示" : "真实模式"}
+              {targetLabel}
             </span>
           </div>
         </div>
-        <div className="session-tools">
-          <button
-            className="icon-button"
-            title="本会话资料"
-            aria-label="本会话资料"
-            disabled={live.active || live.settling}
-            onClick={() => setDocumentsOpen(true)}
-          >
-            <BookOpen size={17} />
-          </button>
-          <button
-            className="icon-button danger"
-            title="删除会话"
-            aria-label="删除会话"
-            disabled={live.active || live.settling}
-            onClick={async () => {
-              if (
-                confirm(
-                  "确定删除整个会话？字幕、音频、资料及派生内容将被删除。",
-                )
-              ) {
-                try {
-                  await request(`/sessions/${session.id}`, {
-                    method: "DELETE",
-                  });
-                  deleted();
-                } catch (e) {
-                  notify(e instanceof Error ? e.message : "删除失败");
-                }
-              }
-            }}
-          >
-            <Trash2 size={17} />
-          </button>
-          <div className="dropdown">
+        <details
+          className="session-details"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.currentTarget.open = false;
+              event.currentTarget.querySelector("summary")?.focus();
+            }
+          }}
+        >
+          <summary aria-label="会话工具与详情" title="会话工具与详情">
+            <ChevronDown size={18} />
+            <span>工具与详情</span>
+          </summary>
+          <div className="session-details-content">
+            <p className="session-full-title">{session.title}</p>
             <button
-              className="secondary"
-              disabled={exportBusy}
-              onClick={() => setExporting(!exporting)}
+              className="back-link"
+              onClick={back}
+              disabled={live.active || live.settling}
             >
-              <Download size={15} />
-              <span>{exportBusy ? "生成中" : "导出"}</span>
-              <ChevronDown size={13} />
+              <ChevronLeft size={14} />
+              全部会话
             </button>
-            {exporting && (
-              <div className="dropdown-menu">
-                {[
-                  ["md", "Markdown"],
-                  ["txt", "纯文本 TXT"],
-                  ["pdf", "PDF 报告"],
-                ].map(([value, label]) => (
-                  <a
-                    key={value}
-                    download
-                    href={`/api/sessions/${session.id}/export?format=${value}`}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      void downloadReport(value);
-                    }}
+            <div className="session-meta">
+              <span>{formatDate(session.created_at)}</span>
+              <span>·</span>
+              <span>
+                <Languages size={13} />
+                {session.mode === "demo"
+                  ? `韩语 / 英语 → ${targetLabel}`
+                  : live.active
+                    ? `当前识别提示：${live.preparing ? "准备中" : live.asrLanguageMode ? asrLanguageLabels[live.asrLanguageMode] : "服务端未报告"} → ${targetLabel}`
+                    : `下次识别提示：${asrLanguageLabels[preferences.asr_language_mode || "auto"]} → ${targetLabel}`}
+              </span>
+              {live.active && live.translationTarget && (
+                <span>
+                  服务端目标：{translationLanguageLabel(live.translationTarget)}
+                </span>
+              )}
+              <span
+                className={`badge ${session.mode === "demo" ? "amber" : "blue"}`}
+              >
+                {session.mode === "demo" ? "模拟演示" : "真实模式"}
+              </span>
+            </div>
+            <div className="session-tools">
+              <button
+                className="icon-button"
+                title="本会话资料"
+                aria-label="本会话资料"
+                disabled={live.active || live.settling}
+                onClick={() => setDocumentsOpen(true)}
+              >
+                <BookOpen size={17} />
+              </button>
+              <button
+                className="icon-button danger"
+                title="删除会话"
+                aria-label="删除会话"
+                disabled={live.active || live.settling}
+                onClick={async () => {
+                  if (
+                    confirm(
+                      "确定删除整个会话？字幕、音频、资料及派生内容将被删除。",
+                    )
+                  ) {
+                    try {
+                      await request(`/sessions/${session.id}`, {
+                        method: "DELETE",
+                      });
+                      deleted();
+                    } catch (e) {
+                      notify(e instanceof Error ? e.message : "删除失败");
+                    }
+                  }
+                }}
+              >
+                <Trash2 size={17} />
+              </button>
+              <div className="dropdown">
+                <button
+                  className="secondary"
+                  disabled={exportBusy}
+                  onClick={() => setExporting(!exporting)}
+                >
+                  <Download size={15} />
+                  <span>{exportBusy ? "生成中" : "导出"}</span>
+                  <ChevronDown size={13} />
+                </button>
+                {exporting && (
+                  <div className="dropdown-menu">
+                    {[
+                      ["md", "Markdown"],
+                      ["txt", "纯文本 TXT"],
+                      ["pdf", "PDF 报告"],
+                    ].map(([value, label]) => (
+                      <a
+                        key={value}
+                        download
+                        href={`/api/sessions/${session.id}/export?format=${value}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          void downloadReport(value);
+                        }}
+                      >
+                        {label}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button
+                className="icon-button"
+                title={focus ? "退出专注" : "专注阅读"}
+                aria-label="切换专注阅读"
+                onClick={() => setFocus(!focus)}
+              >
+                {focus ? <Expand size={18} /> : <Focus size={18} />}
+              </button>
+              <button
+                className="icon-button desktop-side-toggle"
+                title={sidebar ? "收起侧栏" : "展开侧栏"}
+                aria-label="切换侧栏"
+                onClick={() => setSidebar(!sidebar)}
+              >
+                {sidebar ? (
+                  <PanelRightClose size={18} />
+                ) : (
+                  <PanelRightOpen size={18} />
+                )}
+              </button>
+            </div>
+            <div
+              className={`mode-banner ${session.mode === "demo" ? "demo" : "real"}`}
+            >
+              <span>
+                {session.mode === "demo" ? (
+                  <Sparkles size={15} />
+                ) : (
+                  <Mic size={15} />
+                )}
+                <strong>
+                  {session.mode === "demo"
+                    ? "模拟演示，不调用付费 API"
+                    : "真实语音理解"}
+                </strong>
+                {live.active && !live.preparing && live.translationTarget && (
+                  <small>
+                    本次翻译：{translationLanguageLabel(live.translationTarget)}
+                  </small>
+                )}
+                {session.mode === "real" &&
+                  live.active &&
+                  !live.preparing &&
+                  live.asrEnhancement && (
+                    <small>
+                      本次热词 {live.asrEnhancement.hotword_count} 项 · 课程背景{" "}
+                      {live.asrEnhancement.context_chars} 字
+                    </small>
+                  )}
+                <span>
+                  {session.mode === "demo"
+                    ? "演示字幕带模拟标记，不使用麦克风。"
+                    : "保持页面在前台，不保证锁屏或后台录音。"}
+                </span>
+              </span>
+              <span className="saved-indicator">
+                <Check size={14} />
+                稳定字幕自动保存
+              </span>
+            </div>
+            <div className="subtitle-footer">
+              <span>
+                <Check size={13} />
+                已保存的内容可刷新恢复
+              </span>
+              <div>
+                <button
+                  className="text-button"
+                  disabled={live.active || live.settling || !live.segments.length}
+                  onClick={async () => {
+                    if (
+                      confirm("确定清空此会话的字幕与派生内容？此操作不可撤销。")
+                    ) {
+                      try {
+                        const result = await request<{ event_seq?: number }>(
+                          `/sessions/${session.id}/segments`,
+                          {
+                            method: "DELETE",
+                          },
+                        );
+                        live.clear(result.event_seq);
+                        refresh();
+                      } catch (e) {
+                        notify(e instanceof Error ? e.message : "清空失败");
+                      }
+                    }
+                  }}
+                >
+                  <Trash2 size={13} />
+                  清空
+                </button>
+              </div>
+            </div>
+            {session.mode === "real" && (
+              <details className="microphone-options">
+                <summary>
+                  麦克风与拾音设置 ·{" "}
+                  {live.asrAcousticProfile === "near"
+                    ? "本次近场"
+                    : live.asrAcousticProfile === "far"
+                      ? "本次远场"
+                      : "等待识别场景确认"}
+                </summary>
+                <div className="microphone-controls">
+                  <label htmlFor="classbridge-microphone">麦克风：</label>
+                  <select
+                    id="classbridge-microphone"
+                    aria-label="录音麦克风"
+                    disabled={live.active || live.settling}
+                    value={microphoneId}
+                    onChange={(event) => chooseMicrophone(event.target.value)}
                   >
-                    {label}
-                  </a>
-                ))}
+                    <option value="">系统默认麦克风</option>
+                    {microphoneId &&
+                      !microphones.some((m) => m.deviceId === microphoneId) && (
+                        <option value={microphoneId}>
+                          此前选择的设备（可能已断开）
+                        </option>
+                      )}
+                    {microphones
+                      .filter((m) => m.deviceId !== "default")
+                      .map((m, index) => (
+                        <option key={m.deviceId} value={m.deviceId}>
+                          {m.label || `麦克风 ${index + 1}`}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    className="text-button"
+                    type="button"
+                    onClick={refreshMicrophones}
+                    disabled={live.active || live.settling}
+                  >
+                    刷新设备
+                  </button>
+                  <span className="tiny muted">
+                    本次识别：
+                    {live.asrAcousticProfile === "near"
+                      ? "近场"
+                      : live.asrAcousticProfile === "far"
+                        ? "远场"
+                        : "尚未收到服务端确认"}{" "}
+                    · 下次请求：
+                    {preferences.audio_processing_mode === "natural"
+                      ? "浏览器原声模式"
+                      : "浏览器标准处理"}
+                  </span>
+                  {deviceError && <span role="status">{deviceError}</span>}
+                  {live.appliedAudio && (
+                    <span className="tiny muted">
+                      浏览器实际报告：
+                      {(
+                        [
+                          ["echoCancellation", "回声消除"],
+                          ["noiseSuppression", "降噪"],
+                          ["autoGainControl", "自动增益"],
+                        ] as const
+                      )
+                        .map(
+                          ([key, label]) =>
+                            `${label}${live.appliedAudio?.[key] === undefined ? "未报告" : live.appliedAudio[key] ? "开" : "关"}`,
+                        )
+                        .join(" · ")}
+                      （硬件处理未知）
+                    </span>
+                  )}
+                  {live.active && live.audioQuality && (
+                    <span className="tiny muted">
+                      峰值 {live.inputPeak.toFixed(2)} /{" "}
+                      {Math.round(live.audioQuality.peak_window_ms)}ms窗口 ·
+                      电平不是识别置信度
+                    </span>
+                  )}
+                  {live.active && live.audioQuality?.possible_clipping && (
+                    <strong role="status">
+                      输入连续接近满幅，可能削波；请检查设备增益
+                    </strong>
+                  )}
+                </div>
+              </details>
+            )}
+            <div className="capture-right">
+              <span>
+                {session.retain_audio
+                  ? session.mode === "demo"
+                    ? "模拟不保存音频"
+                    : `音频保留 ${preferences.audio_retention_days} 天`
+                  : "仅保存文字"}
+              </span>
+              <button
+                className="text-button"
+                disabled={live.active || live.settling || !audioAvailable}
+                title={
+                  audioAvailable
+                    ? "使用保留音频生成独立新版本"
+                    : "没有可用音频；请在创建真实会话前开启音频保留"
+                }
+                onClick={async () => {
+                  try {
+                    await post(`/sessions/${session.id}/reprocess`);
+                    notify("会后校正任务已提交，新版本不会覆盖旧引用");
+                    refresh();
+                  } catch (e) {
+                    notify(e instanceof Error ? e.message : "无法进行会后校正");
+                  }
+                }}
+              >
+                <RefreshCw size={12} />
+                会后校正
+              </button>
+            </div>
+            {!!Object.keys(live.latency).length && (
+              <div className="latency-strip">
+                {session.mode === "demo"
+                  ? "模拟时序（非真实延迟）："
+                  : "服务端测量（不含浏览器绘制）：原文/预览首字距语音起点；正式结果距语音终点；排队/模型为独立耗时"}
+                {Object.entries(live.latency)
+                  .filter(
+                    ([key, value]) =>
+                      [
+                        "source_first_ms",
+                        "source_final_ms",
+                        "translation_first_ms",
+                        "translation_final_ms",
+                        "preview_first_ms",
+                        "translation_queue_ms",
+                        "translation_model_first_ms",
+                        "translation_model_final_ms",
+                      ].includes(key) && typeof value === "number",
+                  )
+                  .map(([key, value]) => (
+                    <span key={key}>
+                      {(
+                        {
+                          source_first_ms: "原文首字",
+                          source_final_ms: "原文定稿",
+                          translation_first_ms: "译文首字",
+                          translation_final_ms: "译文定稿",
+                          preview_first_ms: "临时译文首字",
+                          translation_queue_ms: "后台排队",
+                          translation_model_first_ms: "模型首字耗时",
+                          translation_model_final_ms: "模型完成耗时",
+                        } as Record<string, string>
+                      )[key] || key}{" "}
+                      {Math.max(0, Math.round(Number(value)))}ms
+                    </span>
+                  ))}
               </div>
             )}
           </div>
-          <button
-            className="icon-button"
-            title={focus ? "退出专注" : "专注阅读"}
-            aria-label="切换专注阅读"
-            onClick={() => setFocus(!focus)}
-          >
-            {focus ? <Expand size={18} /> : <Focus size={18} />}
-          </button>
-          <button
-            className="icon-button desktop-side-toggle"
-            title={sidebar ? "收起侧栏" : "展开侧栏"}
-            aria-label="切换侧栏"
-            onClick={() => setSidebar(!sidebar)}
-          >
-            {sidebar ? (
-              <PanelRightClose size={18} />
-            ) : (
-              <PanelRightOpen size={18} />
-            )}
-          </button>
-        </div>
-      </div>
-      <div
-        className={`mode-banner ${session.mode === "demo" ? "demo" : "real"}`}
-      >
-        <span>
-          {session.mode === "demo" ? <Sparkles size={15} /> : <Mic size={15} />}
-          <strong>
-            {session.mode === "demo"
-              ? "模拟演示，不调用付费 API"
-              : "真实语音理解"}
-          </strong>
-          {live.active && !live.preparing && live.translationTarget && (
-            <small>本次翻译：{translationLanguageLabel(live.translationTarget)}</small>
-          )}
-          {session.mode === "real" && live.active && !live.preparing && live.asrEnhancement && (
-            <small>本次热词 {live.asrEnhancement.hotword_count} 项 · 课程背景 {live.asrEnhancement.context_chars} 字</small>
-          )}
-          <span>
-            {session.mode === "demo"
-              ? "演示字幕带模拟标记，不使用麦克风。"
-              : "保持页面在前台，不保证锁屏或后台录音。"}
-          </span>
-        </span>
-        <span className="saved-indicator">
-          <Check size={14} />
-          稳定字幕自动保存
-        </span>
+        </details>
       </div>
       {live.preparing && (
         <div className="mode-banner real" role="status">
@@ -729,36 +961,6 @@ export function SessionView({
               回到最新
             </button>
           )}
-          <div className="subtitle-footer">
-            <span>
-              <Check size={13} />
-              已保存的内容可刷新恢复
-            </span>
-            <div>
-              <button
-                className="text-button"
-                disabled={live.active || live.settling || !live.segments.length}
-                onClick={async () => {
-                  if (
-                    confirm("确定清空此会话的字幕与派生内容？此操作不可撤销。")
-                  ) {
-                    try {
-                      const result = await request<{event_seq?:number}>(`/sessions/${session.id}/segments`, {
-                        method: "DELETE",
-                      });
-                      live.clear(result.event_seq);
-                      refresh();
-                    } catch (e) {
-                      notify(e instanceof Error ? e.message : "清空失败");
-                    }
-                  }
-                }}
-              >
-                <Trash2 size={13} />
-                清空
-              </button>
-            </div>
-          </div>
         </section>
         <aside className="insight-sidebar">
           <div className="insight-tabs">
@@ -798,34 +1000,6 @@ export function SessionView({
           </div>
         </aside>
       </div>
-      {session.mode === "real" && (
-        <details className="microphone-options">
-          <summary>麦克风与拾音设置 · {live.asrAcousticProfile === "near" ? "本次近场" : live.asrAcousticProfile === "far" ? "本次远场" : "等待识别场景确认"}</summary>
-          <div className="microphone-controls">
-          <label htmlFor="classbridge-microphone">麦克风：</label>
-          <select id="classbridge-microphone" aria-label="录音麦克风"
-            disabled={live.active || live.settling}
-            value={microphoneId}
-            onChange={(event) => chooseMicrophone(event.target.value)}>
-            <option value="">系统默认麦克风</option>
-            {microphoneId && !microphones.some((m) => m.deviceId === microphoneId) &&
-              <option value={microphoneId}>此前选择的设备（可能已断开）</option>}
-            {microphones.filter((m) => m.deviceId !== "default").map((m, index) =>
-              <option key={m.deviceId} value={m.deviceId}>{m.label || `麦克风 ${index + 1}`}</option>)}
-          </select>
-          <button className="text-button" type="button" onClick={refreshMicrophones}
-            disabled={live.active || live.settling}>刷新设备</button>
-          <span className="tiny muted">
-            本次识别：{live.asrAcousticProfile === "near" ? "近场" : live.asrAcousticProfile === "far" ? "远场" : "尚未收到服务端确认"} ·
-            下次请求：{preferences.audio_processing_mode === "natural" ? "浏览器原声模式" : "浏览器标准处理"}
-          </span>
-          {deviceError && <span role="status">{deviceError}</span>}
-          {live.appliedAudio && <span className="tiny muted">浏览器实际报告：{([['echoCancellation','回声消除'],['noiseSuppression','降噪'],['autoGainControl','自动增益']] as const).map(([key,label])=>`${label}${live.appliedAudio?.[key]===undefined?'未报告':live.appliedAudio[key]?'开':'关'}`).join(' · ')}（硬件处理未知）</span>}
-          {live.active && live.audioQuality && <span className="tiny muted">峰值 {live.inputPeak.toFixed(2)} / {Math.round(live.audioQuality.peak_window_ms)}ms窗口 · 电平不是识别置信度</span>}
-          {live.active && live.audioQuality?.possible_clipping && <strong role="status">输入连续接近满幅，可能削波；请检查设备增益</strong>}
-          </div>
-        </details>
-      )}
       <div className="capture-bar" aria-label="录音控制">
         <div className="capture-left">
           <span
@@ -885,75 +1059,7 @@ export function SessionView({
             </button>
           )}
         </div>
-        <div className="capture-right">
-          <span>
-            {session.retain_audio
-              ? session.mode === "demo"
-                ? "模拟不保存音频"
-                : `音频保留 ${preferences.audio_retention_days} 天`
-              : "仅保存文字"}
-          </span>
-          <button
-            className="text-button"
-            disabled={live.active || live.settling || !audioAvailable}
-            title={
-              audioAvailable
-                ? "使用保留音频生成独立新版本"
-                : "没有可用音频；请在创建真实会话前开启音频保留"
-            }
-            onClick={async () => {
-              try {
-                await post(`/sessions/${session.id}/reprocess`);
-                notify("会后校正任务已提交，新版本不会覆盖旧引用");
-                refresh();
-              } catch (e) {
-                notify(e instanceof Error ? e.message : "无法进行会后校正");
-              }
-            }}
-          >
-            <RefreshCw size={12} />
-            会后校正
-          </button>
-        </div>
       </div>
-      {!!Object.keys(live.latency).length && (
-        <div className="latency-strip">
-          {session.mode === "demo"
-            ? "模拟时序（非真实延迟）："
-            : "服务端测量（不含浏览器绘制）：原文/预览首字距语音起点；正式结果距语音终点；排队/模型为独立耗时"}
-          {Object.entries(live.latency)
-            .filter(
-              ([key, value]) =>
-                [
-                  "source_first_ms",
-                  "source_final_ms",
-                  "translation_first_ms",
-                  "translation_final_ms",
-                  "preview_first_ms",
-                  "translation_queue_ms",
-                  "translation_model_first_ms",
-                  "translation_model_final_ms",
-                ].includes(key) && typeof value === "number",
-            )
-            .map(([key, value]) => (
-              <span key={key}>
-                {(
-                  {
-                    source_first_ms: "原文首字",
-                    source_final_ms: "原文定稿",
-                    translation_first_ms: "译文首字",
-                    translation_final_ms: "译文定稿",
-                    preview_first_ms: "临时译文首字",
-                    translation_queue_ms: "后台排队",
-                    translation_model_first_ms: "模型首字耗时",
-                    translation_model_final_ms: "模型完成耗时",
-                  } as Record<string, string>
-                )[key] || key}{" "}
-                {Math.max(0, Math.round(Number(value)))}ms
-              </span>
-            ))}
-        </div>
-      )}
       {!!session.tasks?.some(
         (t) =>
           t.kind === "export" || t.status === "failed" || t.status === "retry",
@@ -1020,13 +1126,7 @@ export function SessionView({
         />
       )}
       {documentsOpen && (
-        <div className="modal-backdrop">
-          <section
-            className="modal session-documents"
-            role="dialog"
-            aria-modal="true"
-            aria-label="本会话资料"
-          >
+        <Dialog title="本会话资料" className="session-documents" close={() => setDocumentsOpen(false)}>
             <div className="modal-title">
               <h2>本会话资料</h2>
               <button
@@ -1042,8 +1142,7 @@ export function SessionView({
               defaultMode={session.mode}
               notify={notify}
             />
-          </section>
-        </div>
+        </Dialog>
       )}
       {selectedSource?.kind === "sentence" && (
         <div className="source-popover" role="dialog" aria-label="原文引用">
