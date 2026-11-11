@@ -134,6 +134,11 @@ export function applySourceEvent(
   return { ...state, sources: { ...state.sources, [key]: value } };
 }
 
+function previewCompatible(text: string, previous: string): boolean {
+  const key = (value: string) => (value.endsWith(".") || value.endsWith("。")) && !value.endsWith("..") ? value.slice(0,-1) : value;
+  return text.startsWith(previous) || key(text) === key(previous);
+}
+
 // Translation metadata can validate a source, never create or change one.
 export function applyTranslationEvent(
   state: TranscriptState,
@@ -150,7 +155,8 @@ export function applyTranslationEvent(
   const failed = event.type === "processing.failed";
   if (source?.status === "retired") return state;
   if (source && revision < source.revision) return state;
-  if (source?.status === "final" && preview) return state;
+  if (source?.status === "final" && preview &&
+      (event.preview_source_text !== source.text || revision !== source.revision)) return state;
   if (
     source?.status === "final" &&
     revision > source.revision &&
@@ -165,7 +171,7 @@ export function applyTranslationEvent(
       (state.activeStream && event.stream_id !== state.activeStream))
   )
     return state;
-  if (preview && source && !source.text.startsWith(event.preview_source_text!))
+  if (preview && source && !previewCompatible(source.text,event.preview_source_text!))
     return state;
   if (old && revision < old.source_revision) return state;
   if (
@@ -223,7 +229,7 @@ export function applyTranslationEvent(
   // remains on screen. Never turn a target-language common prefix into final.
   const fallback = old?.fallback_preview ?? (old?.preview_complete ? old : undefined);
   if (preview && !failed && !event.preview_complete && fallback && source?.status === "partial" &&
-      fallback.preview_source_text !== undefined && source.text.startsWith(fallback.preview_source_text) &&
+      fallback.preview_source_text !== undefined && previewCompatible(source.text,fallback.preview_source_text) &&
       value.text.length < fallback.text.length) value.fallback_preview = fallback;
   if (old && JSON.stringify(old) === JSON.stringify(value)) return state;
   const translations = { ...state.translations, [key]: value };
@@ -377,12 +383,18 @@ export function matchesSource(s: SourceState, t: TranslationState): boolean {
 function visibleTranslation(
   s: SourceState,
   t?: TranslationState,
+  previewAllowed = true,
 ): TranslationState | undefined {
   if (!t || s.status === "interrupted") return undefined;
+  if (t.preview_source_text !== undefined && !previewAllowed) return undefined;
   if (t.fallback_preview && s.status === "partial" && t.fallback_preview.source_revision <= s.revision &&
-      s.text.startsWith(t.fallback_preview.preview_source_text!)) return t.fallback_preview;
+      previewCompatible(s.text,t.fallback_preview.preview_source_text!)) return t.fallback_preview;
   if (t.preview_source_text !== undefined) {
-    if (s.status !== "partial" || !s.text.startsWith(t.preview_source_text))
+    // ASR final confirms source, not MT completion. Keep only the exact input
+    // of this source generation visible until its durable snapshot arrives.
+    if (s.status === "final") return t.preview_source_text === s.text &&
+      t.source_revision <= s.revision && t.source_revision >= (s.text_revision ?? s.revision) ? t : undefined;
+    if (s.status !== "partial" || !previewCompatible(s.text,t.preview_source_text))
       return undefined;
     return matchesSource(s, t) || (t.source_revision <= s.revision && t.source_revision >= (s.text_revision ?? s.revision)) ||
       (t.preview_complete &&
@@ -396,7 +408,8 @@ export function orderedSegments(state: TranscriptState): Segment[] {
   return Object.values(state.sources)
     .filter((s) => s.status !== "retired")
     .map((s): Segment => {
-      const t = visibleTranslation(s, state.translations[identity(s)]);
+      const t = visibleTranslation(s, state.translations[identity(s)],
+        !state.closedStreams.includes(s.stream_id) && (!state.activeStream || state.activeStream === s.stream_id));
       return {
         target_language: state.targetLanguage,
         sentence_id: s.sentence_id,

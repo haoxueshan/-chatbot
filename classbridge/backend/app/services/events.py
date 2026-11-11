@@ -52,7 +52,7 @@ def serialize_segment(db, row):
             'mode':row.mode,'speaker':row.speaker,'latency':row.latency,'provenance':row.provenance}
 
 
-def save_final(db, session_id, stream_id, sentence_id, revision, text, start_ms, end_ms, translation=None, latency=None, provenance='realtime', force=False, commit=True, preview_candidate=None):
+def save_final(db, session_id, stream_id, sentence_id, revision, text, start_ms, end_ms, translation=None, latency=None, provenance='realtime', force=False, commit=True, preview_candidate=None, preview_handoff=None):
     session = db.execute(select(Session).where(Session.id == session_id).with_for_update()).scalar_one_or_none()
     if not session or (not force and session.active_stream_id != stream_id): return None
     old = db.query(SegmentRevision).filter_by(session_id=session_id,sentence_id=sentence_id).order_by(SegmentRevision.source_revision.desc()).first()
@@ -69,7 +69,10 @@ def save_final(db, session_id, stream_id, sentence_id, revision, text, start_ms,
     else:
         task_payload={'segment_id':row.id,'source_revision':revision,'target_language':session.target_language}
         if preview_candidate is not None:task_payload['preview_candidate']=preview_candidate
-        enqueue(db,session.user_id,'translate',f'translate:{row.id}',task_payload,session_id=session_id)
+        if preview_handoff is not None:task_payload['preview_handoff']=preview_handoff
+        task=enqueue(db,session.user_id,'translate',f'translate:{row.id}',task_payload,session_id=session_id)
+        # A fallback is at most one paid attempt; uncertain outcomes aren't retried.
+        task.max_attempts=1
     session.duration_ms = max(session.duration_ms,end_ms)
     if commit:db.commit()
     return payload

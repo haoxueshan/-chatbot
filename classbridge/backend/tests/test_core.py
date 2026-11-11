@@ -493,21 +493,25 @@ def test_asr_context_and_weights_validate_and_report_ignored_terms(client):
 
 
 @pytest.mark.asyncio
-async def test_finite_paid_retries(factory,monkeypatch):
+@pytest.mark.parametrize('kind,attempts',[('translate',1),('index_segment',3)])
+async def test_finite_paid_retries(factory,monkeypatch,kind,attempts):
     from app.providers.aliyun import AliyunProvider,ProviderError
     calls=[]
     async def failed_translate(*args,**kwargs):
         calls.append(1);raise ProviderError('timeout','timed out',True)
         yield ''
     monkeypatch.setattr(AliyunProvider,'translate_stream',failed_translate)
+    async def failed_index(*args,**kwargs):
+        calls.append(1);raise ProviderError('timeout','timed out',True)
+    monkeypatch.setattr('app.services.knowledge.handle_task',failed_index)
     with factory() as db:
         seed(db,mode='real');save_final(db,'lesson','stream','s1',1,'Real evidence',0,1000)
-        tid=db.query(ProcessingTask).filter_by(kind='translate').one().id
+        tid=db.query(ProcessingTask).filter_by(kind=kind).one().id
     for _ in range(5):await task_module.execute_task(tid)
     with factory() as db:
-        assert db.get(ProcessingTask,tid).status=='failed' and db.get(ProcessingTask,tid).attempts==3
+        assert db.get(ProcessingTask,tid).status=='failed' and db.get(ProcessingTask,tid).attempts==attempts
         assert db.query(Translation).count()==0
-    assert len(calls)==3
+    assert len(calls)==attempts # uncertain paid MT is not retried; other task policy stays unchanged
 
 
 @pytest.mark.asyncio
@@ -548,6 +552,9 @@ async def test_capture_health_reports_actual_audio_and_does_not_store_content(fa
         assert health['last_audio_age_ms']<1000
         assert -30<health['input_dbfs']<-20
         assert health['transcript_events']==1
+        metrics=health.pop('preview_metrics')
+        assert metrics['translation_preview_requests']==0 and metrics['asr_partial_events']==0
+        assert all(isinstance(v,(int,float)) for v in metrics.values())
         assert all(v is None or isinstance(v,(int,float)) for v in health.values())
         capture.last_audio_at=None
         assert capture.diagnostics()['last_audio_age_ms'] is None

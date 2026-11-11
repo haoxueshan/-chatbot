@@ -10,6 +10,31 @@ function e(type: string, fields: Partial<BridgeEvent> = {}): BridgeEvent {
 }
 const source = "오늘은 RAG 공부합니다.";
 
+test('neutral period changes retain completed preview; rewrite and final still require exact source',()=>{
+  let s=applyEvent(applyEvent(initialTranscript('lesson'),partial()),preview({preview_source_text:source}));
+  s=applyEvent(s,partial({text:source.slice(0,-1),source_revision:2}));
+  assert.equal(orderedSegments(s)[0].translation,'今天学习 RAG。');
+  s=applyEvent(s,e('transcript.final',{text:source.slice(0,-1),source_revision:3,event_seq:1}));
+  assert.equal(orderedSegments(s)[0].translation,'');
+  s=applyEvent(s,preview({preview_source_text:source,source_revision:3}));
+  assert.equal(orderedSegments(s)[0].translation,'');
+});
+
+for (const complete of [false,true]) test(`exact preview survives source final; complete=${complete}`,()=>{
+  let s=applyEvent(applyEvent(initialTranscript('lesson'),partial()),preview({preview_source_text:source,preview_complete:complete}));
+  s=applyEvent(s,e('transcript.final',{text:source,source_revision:2,event_seq:1}));
+  assert.equal(orderedSegments(s)[0].translation,'今天学习 RAG。');
+  assert.equal(orderedSegments(s)[0].translation_final,false);
+  const sources=s.sources;
+  s=applyEvent(s,preview({source_revision:2,preview_source_text:source,preview_complete:true,translation:'完整译文'}));
+  assert.equal(s.sources,sources);
+  assert.equal(orderedSegments(s)[0].translation,'完整译文');
+  s=applyEvent(s,e('translation.final',{source_revision:2,translation:'完整译文',event_seq:2}));
+  s=applyEvent(s,preview({source_revision:2,preview_source_text:source,preview_request_id:9,translation:'旧'}));
+  assert.equal(orderedSegments(s)[0].translation,'完整译文');
+  assert.equal(orderedSegments(s)[0].translation_final,true);
+});
+
 test("equivalent preview preserves view references but consumes event identity", () => {
   let s = applyEvent(applyEvent(initialTranscript("lesson"), partial()), preview());
   const before=s.translations;

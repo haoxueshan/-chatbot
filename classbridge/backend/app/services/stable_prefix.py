@@ -8,6 +8,24 @@ from dataclasses import dataclass, field
 import re
 
 
+def complete_expression(text):
+    """Conservative preview timing hint, NOT agreement, a speaker or ASR final."""
+    if text.endswith(('...', '…')):return False
+    return bool(re.search(r'[.!?。！？]$|(?:습니다|합니다|해요|이에요|예요|이다|주세요|맞아요|아니요|잠깐만요)$',text) or text in ('네','예'))
+
+
+def preview_input_key(text):
+    # Only a single neutral terminal full stop. Keep questions, negation, word
+    # spacing and ellipses distinct; final reuse still requires EXACT input.
+    if text.endswith(('.', '。')) and not text.endswith('..'):return text[:-1]
+    return text
+
+
+def preview_compatible(text, previous):
+    # Display/request continuity only; durable final reuse still requires exact text.
+    return text.startswith(previous) or preview_input_key(text) == preview_input_key(previous)
+
+
 def complete_words(text):
     # A trailing word without whitespace/punctuation may still acquire a Korean
     # ending or English suffix. Never cut an eojeol/word at a character LCP.

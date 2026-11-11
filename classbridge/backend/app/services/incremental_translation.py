@@ -4,6 +4,7 @@ One process-wide admission gate covers all LiveCapture instances. Admission is
 non-waiting: final background requests never wait for a preview semaphore.
 """
 import asyncio
+import contextlib
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 import hashlib
@@ -12,7 +13,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from app.services.stable_prefix import StablePrefixProcessor, complete_words
+from app.services.stable_prefix import StablePrefixProcessor, complete_words, complete_expression, preview_input_key, preview_compatible
 from app.services.translation_timing import TranslationTiming
 
 
@@ -78,6 +79,17 @@ class PreviewBudget:
 preview_budget = PreviewBudget()
 
 
+async def bounded_translation(provider, text, settings, **kwargs):
+    # One finite request in either preview mode, including response streaming.
+    try:
+        async with asyncio.timeout(settings.model_timeout_seconds):
+            async with contextlib.aclosing(provider.translate_stream(text,**kwargs)) as stream:
+                async for delta in stream:yield delta
+    except TimeoutError as exc:
+        from app.providers.aliyun import ProviderError
+        raise ProviderError('timeout','翻译请求超时，未完成的译文不会保存为正式结果。',False) from exc
+
+
 def worth_refresh(previous, text, elapsed, settings):
     return (not text.startswith(previous) or len(text)-len(previous)>=settings.preview_min_change_chars
             or bool(re.search(r'[.!?。！？]$',text)) or elapsed>=settings.preview_max_wait_seconds)
@@ -98,6 +110,8 @@ class Sentence:
     attempted: set = field(default_factory=set)
     completed: object = None
     first_output_at: object = None
+    changed_at: object = None
+    final_revision: object = None
 
 
 class IncrementalTranslator:
@@ -114,7 +128,7 @@ class IncrementalTranslator:
         self.sentences = OrderedDict()
         self.tasks = set()
         self.closed = False
-        self.metrics = {'requests': 0, 'cancelled': 0, 'failed': 0, 'suppressed': 0}
+        self.metrics = {'requests': 0, 'completed': 0, 'cancelled': 0, 'failed': 0, 'suppressed': 0, 'duplicate_mt_suppressed':0}
 
     def _cancel(self, entry):
         entry.request_id += 1
@@ -139,12 +153,13 @@ class IncrementalTranslator:
             entry = Sentence(text, revision, start_ms, end_ms, stamp, stamp)
             self.sentences[sentence_id] = entry
         elif text != entry.text:
+            entry.changed_at = stamp
             # A growing compatible tail can use the same prefix result, explicitly
             # labelled with preview_source_text. A rewrite invalidates it immediately.
-            if entry.requested_text and not text.startswith(entry.requested_text):
+            if entry.requested_text and not preview_compatible(text, entry.requested_text):
                 self._cancel(entry)
                 entry.requested_text = ''
-            if entry.completed and not text.startswith(entry.completed['text']):entry.completed=None
+            if entry.completed and not preview_compatible(text, entry.completed['text']):entry.completed=None
         entry.updated_at = stamp
         entry.text, entry.revision = text, revision
         entry.start_ms, entry.end_ms = start_ms, end_ms
@@ -153,16 +168,20 @@ class IncrementalTranslator:
 
     def expire(self, stamp):
         for sid, entry in list(self.sentences.items()):
-            if stamp - entry.updated_at > self.settings.preview_ttl_seconds:
+            if entry.final_revision is None and stamp - entry.updated_at > self.settings.preview_ttl_seconds:
                 self.discard(sid)
         self.prefix.expire(stamp)
 
     def candidate(self, sid, entry, stamp):
+        quiet = stamp - (entry.changed_at if entry.changed_at is not None else entry.first_at)
+        reference = entry.first_at if entry.last_request_at == float('-inf') else entry.last_request_at
+        if complete_expression(entry.text):
+            ready = quiet >= max(.35, self.settings.preview_min_stable_seconds) or stamp-reference >= self.settings.preview_max_wait_seconds
+            return entry.text if ready else ''
         stable = self.prefix.view(self.stream_id, sid, stamp).stable_preview.rstrip()
         # Heuristic, not a semantic guarantee: Korean predicates/punctuation or
         # several complete words. Timer fallback does not declare source final.
         meaningful = bool(re.search(r'[.!?。！？;；]$|(?:습니다|합니다|해요|이에요|예요|이다)$', stable))
-        reference = entry.first_at if entry.last_request_at == float('-inf') else entry.last_request_at
         if stamp - reference >= self.settings.preview_max_wait_seconds:
             words = complete_words(entry.text)
             if words and (len(words) >= 2 or re.search(r'[.!?。！？]$', entry.text)):
@@ -178,8 +197,10 @@ class IncrementalTranslator:
         self.expire(stamp)
         # Round-robin admission: a long sentence must not starve another sentence.
         for sid, entry in list(self.sentences.items()):
+            if entry.final_revision is not None:continue
             text = self.candidate(sid, entry, stamp)
-            digest = hashlib.sha256(text.encode()).hexdigest()
+            digest = hashlib.sha256(preview_input_key(text).encode()).hexdigest()
+            if text and digest in entry.attempted:self.metrics['duplicate_mt_suppressed']+=1
             if not text or digest in entry.attempted or len(entry.attempted) >= 64:
                 continue
             if stamp - entry.last_request_at < self.settings.preview_interval_seconds:
@@ -216,7 +237,7 @@ class IncrementalTranslator:
         last_emit = float('-inf')
         def valid():
             return (not self.closed and self.sentences.get(sid) is entry
-                    and entry.request_id == request_id and entry.text.startswith(text))
+                    and entry.request_id == request_id and preview_compatible(entry.text,text))
         async def emit(complete=False):
             if not valid(): return
             stamp = self.clock()
@@ -227,7 +248,7 @@ class IncrementalTranslator:
                  'preview_model_final_ms': timing.finish()['translation_model_final_ms'] if complete else None,
                  'preview_first_at': entry.first_output_at})
         try:
-            async for delta in self.provider.translate_stream(text, terms=self.spec['terms'], target_lang=self.spec['target_lang'], require_complete=True):
+            async for delta in bounded_translation(self.provider,text,self.settings,terms=self.spec['terms'], target_lang=self.spec['target_lang'], require_complete=True):
                 if not valid(): return
                 if not delta: continue
                 timing.token(); translated += delta
@@ -239,6 +260,7 @@ class IncrementalTranslator:
                 entry.completed = {'text': text, 'translation': translated,
                     'spec_digest': spec_digest(self.spec), 'stream_id': self.stream_id,
                     'sentence_id': sid, 'completed_at': self.clock(), 'complete': True}
+                self.metrics['completed'] += 1
                 await emit(complete=True)
         except asyncio.CancelledError:
             raise

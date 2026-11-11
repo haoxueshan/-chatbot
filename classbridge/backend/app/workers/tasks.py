@@ -5,7 +5,7 @@ import logging
 import hashlib
 from datetime import datetime, timedelta, timezone
 from celery import Celery
-from sqlalchemy import select, case, and_, or_
+from sqlalchemy import select, case, and_, or_, update
 from app.config import settings
 from app.db import SessionLocal
 from app.models import ProcessingTask, Outbox, Session, SegmentRevision, Translation, AudioAsset, RecognitionStream, User, now
@@ -42,7 +42,7 @@ async def translate(db,task):
     user=db.get(User,session.user_id)
     terms=(user.settings or {}).get('terms',[])
     reused=None
-    from app.services.incremental_translation import translation_spec,validated_reuse,spec_digest
+    from app.services.incremental_translation import translation_spec,validated_reuse,spec_digest,bounded_translation
     spec=translation_spec(settings,terms,language);digest=spec_digest(spec)
     # A timestamp-only formal correction still gets its own source/translation
     # versions and events. Reuse only a proven complete, same-spec formal result.
@@ -73,7 +73,7 @@ async def translate(db,task):
         else:
             kwargs={'terms':translation_terms(terms,language),'target_lang':target_name(language)}
             kwargs['require_complete']=True
-            async for delta in AliyunProvider().translate_stream(row.text,**kwargs):yield delta
+            async for delta in bounded_translation(AliyunProvider(),row.text,settings,**kwargs):yield delta
     async for delta in output():
         if not delta:continue
         timing.token();first=0 if reused is not None else timing.first
@@ -99,11 +99,13 @@ async def translate(db,task):
     source_delay=max(0,int(row.latency.get('source_final_ms',0)))
     row.latency={**row.latency,'translation_first_ms':source_delay+source_wait+(first or 0),
       'translation_final_ms':source_delay+source_wait+elapsed,'translation_queue_ms':queue_wait,
-      **model_timing,'translation_reused':reused is not None,'translation_clock':'server_estimate_from_source_audio_end',
+      **model_timing,'translation_reused':reused is not None,'translation_fallback_requests':int(reused is None),'translation_clock':'server_estimate_from_source_audio_end',
       'translation_queue_clock':'wall_task_created_to_attempt_start','translation_queue_clock_skew':clock_skew}
-    save_translation(db,row.id,translated,target_language=language)
+    saved=save_translation(db,row.id,translated,target_language=language)
     db.commit()
+    if saved is None:return {'skipped':'source_superseded_or_translation_saved'}
     return {'segment_id':row.id,'reused':reused is not None,'translation_queue_ms':queue_wait,
+            'translation_reused':int(reused is not None),'translation_fallback_requests':int(reused is None),
             'translation_spec_digest':digest,'translation_text_digest':hashlib.sha256(translated.encode()).hexdigest(),
             'translation_complete':True,**model_timing}
 
@@ -190,9 +192,30 @@ async def execute_task(task_id):
             # even when a retry or an abandoned running task is replayed.
             cancel_retired_task(task);db.commit();return
         if not task or task.status not in ('pending','retry'):return
+        if task.kind=='translate' and db.query(Translation).filter_by(segment_id=task.payload.get('segment_id'),
+                target_language=task.payload.get('target_language','zh-CN')).first():
+            task.status='completed';task.result={**(task.result or {}),'skipped':'translation_already_saved'};task.error=None
+            db.commit();return
+        if task.kind=='translate' and task.payload.get('preview_handoff'):
+            from app.services.translation_dispatch import handoff_pending
+            if handoff_pending(task.payload,now()):return
+            # Owner disappeared/timed out: completion is unknown. Never submit
+            # a second paid inference merely because a lease expired.
+            task.status='failed';task.error='持续翻译交接超时，结果不确定；原文已保存，未自动重复请求';task.updated_at=now()
+            row=db.get(SegmentRevision,task.payload.get('segment_id'))
+            session=db.get(Session,task.session_id)
+            if row and session:
+                emit(db,session,'processing.failed',task_kind='translate',task_id=task.id,code='preview_outcome_unknown',
+                     message=task.error,status='failed',stream_id=row.stream_id,sentence_id=row.sentence_id,source_revision=row.source_revision)
+            db.commit();return
         if task.attempts>=task.max_attempts:
             task.status='failed';task.error='已达到有限重试上限';db.commit();return
-        task.status='running';task.attempts+=1;task.updated_at=now();db.commit()
+        if task.kind=='translate':
+            claimed=db.execute(update(ProcessingTask).where(ProcessingTask.id==task_id,
+                ProcessingTask.status.in_(['pending','retry'])).values(status='running',attempts=ProcessingTask.attempts+1,updated_at=now()))
+            if claimed.rowcount!=1:db.rollback();return
+        else:task.status='running';task.attempts+=1;task.updated_at=now()
+        db.commit();db.refresh(task)
         try:
             if task.kind=='translate': result=await translate(db,task)
             elif task.kind=='reprocess': result=await reprocess(db,task)
@@ -232,7 +255,7 @@ async def execute_task(task_id):
             db.rollback();task=db.get(ProcessingTask,task_id)
             if not task:return
             from app.providers.aliyun import ProviderError
-            retryable=isinstance(exc,ProviderError) and exc.retryable
+            retryable=task.kind!='translate' and isinstance(exc,ProviderError) and exc.retryable
             task.error=exc.message if isinstance(exc,ProviderError) else (str(exc)[:500] if isinstance(exc,ValueError) else '后台处理失败，请查看服务端错误类型')
             task.status='retry' if retryable and task.attempts<task.max_attempts else 'failed'
             task.updated_at=now()
