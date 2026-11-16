@@ -3,6 +3,7 @@ import type {
   BridgeEvent,
   Segment,
   SourceState,
+  TranslationSnapshot,
   TranslationState,
 } from "./types";
 export interface TranscriptState {
@@ -199,6 +200,7 @@ export function applyTranslationEvent(
       return state;
     if (
       event.type === "translation.partial" &&
+      !event.preview_complete &&
       !replacement &&
       tr === old.revision &&
       (event.translation?.length || 0) < old.text.length
@@ -219,18 +221,25 @@ export function applyTranslationEvent(
         : "final",
     translation_event_seq:
       seqOf(event) || (same ? old.translation_event_seq : undefined),
-    preview_source_text: event.preview_source_text,
-    preview_request_id: event.preview_request_id,
-    preview_complete: event.preview_complete,
+    preview_source_text: failed ? (event.preview_source_text ?? old?.preview_source_text) : event.preview_source_text,
+    preview_request_id: failed ? (event.preview_request_id ?? old?.preview_request_id) : event.preview_request_id,
+    preview_complete: failed ? (!replacement && old?.preview_complete) : event.preview_complete,
     error: failed ? event.message : undefined,
     latency: { ...(same ? old.latency : undefined), ...event.latency },
   };
   // Track the NEW request identity even while a compatible completed preview
   // remains on screen. Never turn a target-language common prefix into final.
-  const fallback = old?.fallback_preview ?? (old?.preview_complete ? old : undefined);
-  if (preview && !failed && !event.preview_complete && fallback && source?.status === "partial" &&
+  let fallback = old?.fallback_preview;
+  if (!fallback && old?.preview_complete) {
+    const { fallback_preview: _discarded, ...snapshot } = old;
+    fallback = snapshot;
+  }
+  if (((preview && !event.preview_complete) || failed) && fallback?.preview_complete && source &&
+      (source.status === "partial" || source.status === "final") &&
+      fallback.target_language === state.targetLanguage &&
       fallback.preview_source_text !== undefined && previewCompatible(source.text,fallback.preview_source_text) &&
-      value.text.length < fallback.text.length) value.fallback_preview = fallback;
+      !state.closedStreams.includes(event.stream_id!) && (!state.activeStream || state.activeStream === event.stream_id))
+    value.fallback_preview = fallback;
   if (old && JSON.stringify(old) === JSON.stringify(value)) return state;
   const translations = { ...state.translations, [key]: value };
   // Misordered translation-only messages may wait for sources, but never grow without bound.
@@ -377,18 +386,22 @@ export function applyEvent(
   }
 }
 
-export function matchesSource(s: SourceState, t: TranslationState): boolean {
+export function matchesSource(s: SourceState, t: TranslationSnapshot): boolean {
   return identity(s) === identity(t) && s.revision === t.source_revision;
 }
 function visibleTranslation(
   s: SourceState,
   t?: TranslationState,
   previewAllowed = true,
-): TranslationState | undefined {
+): TranslationSnapshot | undefined {
   if (!t || s.status === "interrupted") return undefined;
   if (t.preview_source_text !== undefined && !previewAllowed) return undefined;
-  if (t.fallback_preview && s.status === "partial" && t.fallback_preview.source_revision <= s.revision &&
-      previewCompatible(s.text,t.fallback_preview.preview_source_text!)) return t.fallback_preview;
+  const fallback=t.fallback_preview;
+  if (fallback && previewAllowed && fallback.source_revision <= s.revision &&
+      ((s.status === "partial" && previewCompatible(s.text,fallback.preview_source_text!)) ||
+       (s.status === "final" && fallback.preview_source_text === s.text &&
+        fallback.source_revision >= (s.text_revision ?? s.revision))))
+    return t.status === "failed" ? { ...fallback, status: "failed", error: t.error } : fallback;
   if (t.preview_source_text !== undefined) {
     // ASR final confirms source, not MT completion. Keep only the exact input
     // of this source generation visible until its durable snapshot arrives.

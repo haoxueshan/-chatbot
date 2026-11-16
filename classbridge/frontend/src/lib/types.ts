@@ -26,8 +26,7 @@ export interface SourceState {
   provenance?: string;
   latency?: Segment["latency"];
 }
-export interface TranslationState {
-  fallback_preview?: TranslationState; // at most one compatible completed display snapshot
+export interface TranslationSnapshot {
   target_language?: TargetLanguage;
   sentence_id: string;
   stream_id: string;
@@ -41,6 +40,9 @@ export interface TranslationState {
   preview_complete?: boolean;
   error?: string;
   latency?: Segment["latency"];
+}
+export interface TranslationState extends TranslationSnapshot {
+  fallback_preview?: TranslationSnapshot; // one flat completed snapshot, never another fallback
 }
 export interface Segment {
   target_language?: TargetLanguage;

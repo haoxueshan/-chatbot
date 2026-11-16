@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { applyEvent, initialTranscript, orderedSegments } from "../src/lib/events.ts";
 import type { BridgeEvent } from "../src/lib/types.ts";
+import { translationLanguages, translationDirection, type TargetLanguage } from "../src/lib/translationLanguages.ts";
 
 function e(type: string, fields: Partial<BridgeEvent> = {}): BridgeEvent {
   return { type, session_id: "lesson", stream_id: "stream", sentence_id: "1",
@@ -9,6 +10,146 @@ function e(type: string, fields: Partial<BridgeEvent> = {}): BridgeEvent {
     event_seq: 0, start_ms: 0, end_ms: 1000, mode: "real", ...fields };
 }
 const source = "오늘은 RAG 공부합니다.";
+
+test('first request remains streaming; timestamp-only source versions never clear its completed result',()=>{
+  let s=applyEvent(initialTranscript('lesson'),partial());
+  for (const text of ['今','今天','今天我们学习人工智能。']) {
+    s=applyEvent(s,preview({translation:text,preview_complete:false,preview_source_text:source}));
+    assert.equal(orderedSegments(s)[0].translation,text);
+  }
+  s=applyEvent(s,preview({translation:'今天我们学习人工智能。',preview_source_text:source}));
+  const translations=s.translations;
+  for (let i=2;i<=21;i++) {
+    s=applyEvent(s,partial({source_revision:i,start_ms:i,end_ms:1000+i}));
+    const segment=orderedSegments(s)[0];
+    assert.equal(segment.translation,'今天我们学习人工智能。');
+    assert.equal(segment.text,source);
+    assert.equal(segment.start_ms,i);
+    assert.equal(segment.end_ms,1000+i);
+    assert.equal(s.sources['stream:1'].text_revision,1);
+    assert.equal(s.translations,translations);
+  }
+});
+
+for (const language of Object.keys(translationLanguages) as TargetLanguage[]) {
+  test(`${language}: 30 seconds of growth buffers replacements and restores one authoritative final`,()=>{
+    let s=initialTranscript('lesson',[],[],language);
+    const text=language==='ko' ? 'I have a question.' : source;
+    s=applyEvent(s,partial({text,target_language:language}));
+    s=applyEvent(s,preview({target_language:language,preview_source_text:text,translation:'complete-1'}));
+    let displayed='complete-1',request=1,changes=0;
+    // Six bounded replacements in this fixture; backend budget is tested separately.
+    for(let second=2;second<=30;second++) {
+      const grown=text+' '+('next '.repeat(second)).trim();
+      s=applyEvent(s,partial({text:grown,source_revision:second,end_ms:second*1000}));
+      if (second%5) { assert.equal(orderedSegments(s)[0].translation,displayed);continue; }
+      request++;
+      for(const token of ['', '中', 'unfinished text much longer than previous completed snapshot']) {
+        const sources=s.sources;
+        s=applyEvent(s,preview({target_language:language,source_revision:second,preview_request_id:request,
+          preview_source_text:grown,preview_complete:false,translation:token}));
+        assert.equal(s.sources,sources);
+        assert.equal(orderedSegments(s)[0].translation,displayed);
+        const fallback=s.translations['stream:1'].fallback_preview!;
+        assert.ok(fallback.preview_complete);
+        assert.ok(!('fallback_preview' in fallback));
+        const identity=s.translations;
+        // Wrong language, old version and old request cannot replace either buffer.
+        for(const invalid of [
+          {target_language:language==='en' ? 'ja' as const : 'en' as const},
+          {source_revision:second-1}, {preview_request_id:request-1}, {stream_id:'old-stream'},
+        ]) s=applyEvent(s,preview({target_language:language,source_revision:second,preview_source_text:grown,
+          preview_request_id:request,translation:'invalid',...invalid}));
+        // Foreign-stream metadata can be buffered as an orphan, but never changes this sentence.
+        assert.equal(s.translations['stream:1'],identity['stream:1']);
+        assert.equal(orderedSegments(s)[0].translation,displayed);
+      }
+      displayed=`complete-${request}`;changes++;
+      const complete=preview({target_language:language,source_revision:second,preview_source_text:grown,
+        preview_request_id:request,translation:displayed});
+      s=applyEvent(s,complete);
+      assert.equal(orderedSegments(s)[0].translation,displayed);
+      assert.equal(s.translations['stream:1'].fallback_preview,undefined);
+      const translations=s.translations;
+      s=applyEvent(s,{...complete,event_id:crypto.randomUUID()});
+      assert.equal(s.translations,translations);
+    }
+    assert.equal(changes,6);
+    const finalText=s.sources['stream:1'].text;
+    s=applyEvent(s,e('transcript.final',{text:finalText,source_revision:31,event_seq:10,target_language:language}));
+    assert.equal(orderedSegments(s)[0].translation,displayed);
+    s=applyEvent(s,e('translation.final',{translation:displayed,source_revision:31,event_seq:11,target_language:language}));
+    s=applyEvent(s,preview({source_revision:31,preview_request_id:request+1,preview_source_text:finalText,
+      preview_complete:false,translation:'late',target_language:language}));
+    const segment=orderedSegments(s)[0];
+    assert.equal(segment.translation_final,true);
+    assert.equal(segment.translation,displayed);
+    const restored=orderedSegments(initialTranscript('lesson',[segment],[],language))[0];
+    assert.equal(restored.translation,displayed);
+    assert.equal(restored.target_language,language);
+    assert.equal(translationDirection(language),language==='ar' ? 'rtl' : 'ltr');
+  });
+}
+
+test('incompatible rewrite invalidates fallback immediately and streams the new request',()=>{
+  let s=applyEvent(applyEvent(initialTranscript('lesson'),partial()),preview());
+  s=applyEvent(s,preview({preview_request_id:2,preview_complete:false,translation:'new partial'}));
+  const rewritten='어제는 인공지능을 공부하지 않았습니다.';
+  s=applyEvent(s,partial({text:rewritten,source_revision:2}));
+  assert.equal(orderedSegments(s)[0].translation,'');
+  const sources=s.sources;
+  s=applyEvent(s,preview({source_revision:2,preview_request_id:2,translation:'stale'}));
+  assert.equal(orderedSegments(s)[0].translation,'');
+  for (const text of ['昨天','昨天没有学习']) {
+    s=applyEvent(s,preview({source_revision:2,preview_request_id:3,preview_source_text:rewritten,
+      preview_complete:false,translation:text}));
+    assert.equal(orderedSegments(s)[0].translation,text);
+    assert.equal(s.sources,sources);
+    assert.equal(s.translations['stream:1'].fallback_preview,undefined);
+  }
+});
+
+test('replacement stays buffered even when its first or later tokens exceed the completed preview',()=>{
+  for (const tokens of [['更长的新请求首个中间文本'],['今','今天这段新译文已经比旧译文长很多']]) {
+    let s=applyEvent(applyEvent(initialTranscript('lesson'),partial()),preview({translation:'旧完整译文'}));
+    const grown=source+' 다음으로 모델을 살펴보겠습니다.';
+    s=applyEvent(s,partial({text:grown,source_revision:2}));
+    const sources=s.sources;
+    for (const text of tokens) {
+      s=applyEvent(s,preview({source_revision:2,preview_source_text:grown,preview_request_id:2,preview_complete:false,translation:text}));
+      assert.equal(orderedSegments(s)[0].translation,'旧完整译文');
+      assert.equal(s.translations['stream:1'].preview_request_id,2);
+      assert.equal(s.translations['stream:1'].text,text);
+      assert.equal(s.sources,sources);
+    }
+    // A valid completion may be shorter than the last buffered streaming token.
+    const complete=preview({source_revision:2,preview_source_text:grown,preview_request_id:2,preview_complete:true,translation:'新完整译文'});
+    s=applyEvent(s,complete);
+    assert.equal(orderedSegments(s)[0].translation,'新完整译文');
+    assert.equal(orderedSegments(s)[0].translation_final,false);
+    assert.equal(s.translations['stream:1'].fallback_preview,undefined);
+    const translations=s.translations;
+    s=applyEvent(s,{...complete,event_id:crypto.randomUUID()});
+    assert.equal(s.translations,translations);
+  }
+});
+
+for (const failedRequest of [undefined,3]) test(`failed replacement retains a flat snapshot and request identity (${failedRequest ?? 'unlabelled'})`,()=>{
+  let s=applyEvent(applyEvent(initialTranscript('lesson'),partial()),preview());
+  s=applyEvent(s,preview({preview_request_id:2,preview_complete:false,translation:'新'}));
+  const sources=s.sources;
+  s=applyEvent(s,e('processing.failed',{task_kind:'translate',message:'mock network failure',event_seq:5,
+    ...(failedRequest ? {preview_request_id:failedRequest,preview_source_text:source,preview_complete:false} : {})}));
+  assert.equal(s.sources,sources);
+  assert.equal(orderedSegments(s)[0].translation,'今天学习 RAG。');
+  assert.equal(orderedSegments(s)[0].translation_final,false);
+  assert.equal(orderedSegments(s)[0].translation_status,'failed');
+  assert.equal(s.translations['stream:1'].preview_request_id,failedRequest ?? 2);
+  s=applyEvent(s,preview({preview_request_id:1,translation:'旧请求迟到'}));
+  assert.equal(orderedSegments(s)[0].translation,'今天学习 RAG。');
+  s=applyEvent(s,partial({source_revision:2,text:'어제는 공부하지 않았습니다.'}));
+  assert.equal(orderedSegments(s)[0].translation,'');
+});
 
 test('neutral period changes retain completed preview; rewrite and final still require exact source',()=>{
   let s=applyEvent(applyEvent(initialTranscript('lesson'),partial()),preview({preview_source_text:source}));
