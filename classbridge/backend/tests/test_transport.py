@@ -13,6 +13,24 @@ from app.models import Event
 
 
 @pytest.mark.asyncio
+async def test_subtitle_send_wait_measures_failure_without_logging_content(monkeypatch):
+    import app.ws.live as live
+    from types import SimpleNamespace
+    clock=[10.]
+    monkeypatch.setattr(live,'time',SimpleNamespace(monotonic=lambda:clock[0]))
+    class Socket:
+        async def send_json(self,payload):
+            clock[0]+=.025
+            raise ConnectionError('mock disconnected')
+    capture=LiveCapture(Socket(),'mock-session','mock-user')
+    with pytest.raises(ConnectionError):await capture.send({'text':'private fixture, not a diagnostic'})
+    diagnostic=capture.diagnostics()
+    assert diagnostic['subtitle_send_wait_ms']==25
+    assert diagnostic['pending_processing_tasks']==0 and diagnostic['heartbeat_events']==0
+    assert 'private' not in str(diagnostic)
+
+
+@pytest.mark.asyncio
 async def test_slow_certificate_load_is_shared_and_does_not_stall_audio_loop(monkeypatch):
     monkeypatch.setattr(transport, '_contexts', {})
     monkeypatch.delenv('SSL_CERT_FILE', raising=False)
@@ -65,6 +83,19 @@ def test_asr_glossary_uses_valid_source_words_without_translation_or_foreign_dat
     ])
     assert result == {'working memory': 2, '인지 부하': 2, 'RAG': 2}
     assert len(asr_vocabulary([f'term{i}' for i in range(250)])) == 200
+
+
+def test_korean_english_classroom_terms_preserve_nfc_case_and_owner_weight():
+    import unicodedata
+    from app.services.asr_options import asr_language_hints,asr_vocabulary_report
+    words=['Retrieval-Augmented Generation','RAG','Machine Learning','Deep Learning',
+           '인공지능','자연어 처리','확률 및 큐잉 이론']
+    report=asr_vocabulary_report([{'source':w,'target':'not an ASR hint'} for w in words]+[
+        unicodedata.normalize('NFD','인공지능'),'  자연어   처리  ',''],3)
+    assert report['vocabulary']==dict.fromkeys(words,3)
+    assert len(report['skipped'])==3
+    assert asr_language_hints('ko_en')==['ko','en'] and asr_language_hints('auto') is None
+    assert asr_vocabulary_report([])['vocabulary']=={} # Examples are never injected into sessions.
 
 
 def test_glossary_reports_skipped_terms_and_normalizes_korean_without_inventing_words():

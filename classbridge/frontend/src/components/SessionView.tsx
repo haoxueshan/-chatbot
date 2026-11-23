@@ -929,12 +929,13 @@ export function SessionView({
                   className={`translation-text ${!s.translation_final ? "temporary" : ""}`}
                   style={{ fontSize: preferences.subtitle_size || 24 }}
                 >
-                  {s.source_status === "interrupted" ? "对应原文尚未正式确认" : s.translation_status === "failed" ? "翻译失败，原文已保留" : s.translation || (
+                  {s.source_status === "interrupted" ? "对应原文尚未正式确认" : s.translation || (s.translation_status === "failed" ? "翻译失败，原文已保留" : (
                     <span className="translation-waiting">
                       <span className="typing-dots">•••</span> 正在翻译为{targetLabel}…
                     </span>
-                  )}
+                  ))}
                 </p>
+                {s.translation && s.translation_status === "failed" && <small className="temporary-label" role="status">翻译更新失败 · 保留仍兼容的临时译文，尚未正式完成</small>}
                 {s.translation_final && <small className="translation-status">{targetLabel}翻译已完成</small>}
                 {s.translation && !s.translation_final && s.translation_status !== "failed" && (
                   <small className="temporary-label">

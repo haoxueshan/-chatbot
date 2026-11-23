@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import time
+import tracemalloc
 import types
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -16,8 +17,9 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 os.environ['DASHSCOPE_API_KEY']=''
 from app.ws import live
+from app.providers import aliyun
 
-BASELINE='6e0c638fd663f9f96ef2d335966a05f4612b0783'
+BASELINE=os.environ.get('CLASSBRIDGE_BENCHMARK_BASELINE','6e0c638fd663f9f96ef2d335966a05f4612b0783')
 
 
 class MockDatabase:
@@ -74,8 +76,59 @@ async def measure(module):
 async def main():
     source=subprocess.check_output(['git','show',f'{BASELINE}:classbridge/backend/app/ws/live.py'],encoding='utf-8')
     baseline=types.ModuleType('baseline_audio_live');exec(compile(source,'baseline_audio_live','exec'),baseline.__dict__)
+    provider_source=subprocess.check_output(['git','show',f'{BASELINE}:classbridge/backend/app/providers/aliyun.py'],encoding='utf-8')
+    old_provider=types.ModuleType('baseline_asr');exec(compile(provider_source,'baseline_asr','exec'),old_provider.__dict__)
     print(json.dumps({'baseline_sha':BASELINE,'load':'100 x 640 bytes, 20 ms cadence; Mock backlog query 50 ms',
-        'baseline':await measure(baseline),'current':await measure(live)},indent=2))
+        'baseline':await measure(baseline),'current':await measure(live),
+        'asr_load':'10,000 x 640 bytes unpaced; 200 ASR events; tracemalloc enabled; no network',
+        'asr_baseline':await measure_asr(old_provider),'asr_current':await measure_asr(aliyun)},indent=2))
+
+
+async def measure_asr(module):
+    messages=asyncio.Queue(maxsize=2);task=None;count=0;delivered=0;peak=0;tasks_peak=0;closed=False
+    emitted={};latencies=[];before=set(asyncio.all_tasks());metrics={}
+    async def event(kind,sentence=None):
+        await messages.put(json.dumps({'header':{'event':kind,'task_id':task},
+            'payload':{'output':{'sentence':sentence or {}}}}))
+    class Socket:
+        async def send(self,value):
+            nonlocal count,task,peak,tasks_peak
+            if isinstance(value,bytes):
+                count+=1
+                if count%50==0:
+                    final=count%100==0;sid=str((count-1)//100)
+                    emitted[(sid,final)]=time.perf_counter()
+                    await event('result-generated',{'sentence_id':sid,'text':'synthetic',
+                        'begin_time':((count-1)//100)*2000,'end_time':count*20,'sentence_end':final})
+                    peak=max(peak,metrics.get('transcript_events',0)-delivered)
+                    tasks_peak=max(tasks_peak,len(asyncio.all_tasks()-before))
+            else:
+                header=json.loads(value)['header'];task=header['task_id']
+                await event('task-started' if header['action']=='run-task' else 'task-finished')
+        async def recv(self):return await messages.get()
+    class Context:
+        async def __aenter__(self):return Socket()
+        async def __aexit__(self,*args):
+            nonlocal closed
+            closed=True
+    original=module.connect;module.connect=lambda *a,**k:Context()
+    async def audio():
+        for _ in range(10000):yield bytes(640)
+    config=types.SimpleNamespace(dashscope_api_key='mock-only',dashscope_workspace_id='mock',
+        dashscope_region='cn-beijing',model_timeout_seconds=5)
+    tracemalloc.start();started=time.perf_counter()
+    try:
+        async for value in module.AliyunProvider(config).stream_asr(audio(),metrics=metrics):
+            delivered+=1;latencies.append((time.perf_counter()-emitted.pop((value['sentence_id'],value['final'])))*1000)
+        _,memory_peak=tracemalloc.get_traced_memory()
+        assert count==10000 and delivered==200 and closed and not emitted
+        assert set(asyncio.all_tasks())==before
+        return {'frames':count,'sent_audio_ms':metrics['sent_audio_ms'],'events':delivered,
+            'elapsed_ms':round((time.perf_counter()-started)*1000,2),
+            'event_latency_max_ms':round(max(latencies),3),'event_latency_mean_ms':round(sum(latencies)/delivered,3),
+            'sampled_event_backlog':peak,'peak_tasks':tasks_peak,'remaining_tasks':0,
+            'tracemalloc_peak_bytes':memory_peak}
+    finally:module.connect=original;tracemalloc.stop()
 
 
 if __name__=='__main__':asyncio.run(main())

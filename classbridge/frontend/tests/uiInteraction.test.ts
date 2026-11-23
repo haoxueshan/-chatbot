@@ -733,6 +733,12 @@ test("incremental subtitle DOM separates reversible source and mutable Chinese w
   await act(async () => socket.event({ ...base, type: "translation.partial", event_id: "t",
     translation: "今天学习 RAG", preview_source_text: "오늘은 RAG", preview_request_id: 1, preview_complete: true }));
   assert.match(view.container.textContent!, /临时翻译预览/);
+  await act(async () => socket.event({ ...base, type: "translation.partial", event_id: "replacement",
+    translation: "新请求很长但尚未完整", preview_source_text: "오늘은 RAG", preview_request_id: 2, preview_complete: false }));
+  await act(async () => socket.event({ ...base, type: "processing.failed", event_id: "failed", task_kind: "translate",
+    message: "mock failure" }));
+  assert.equal(view.container.querySelector('.translation-text')?.textContent,'今天学习 RAG');
+  assert.match(view.container.textContent!,/翻译更新失败/);
   await act(async () => socket.event({ ...base, type: "transcript.final", event_id: "f", event_seq: 1,
     source_revision: 2, text: "오늘은 RAG 배웁니다." }));
   assert.equal(view.container.querySelector(".unstable-source-tail"), null);

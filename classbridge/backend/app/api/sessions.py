@@ -72,8 +72,8 @@ def create_session(body: CreateSession,user: User=Depends(current_user),db:DBSes
     if body.mode=='demo' and language!='zh-CN':
         raise HTTPException(422,detail={'code':'demo_language_unsupported','message':'模拟演示仅支持简体中文；其他目标语言请选择真实模式。'})
     if body.mode=='real':
-        from app.providers.aliyun import AliyunProvider
-        AliyunProvider().ensure_configured()
+        from app.providers.asr.factory import create_asr_provider
+        create_asr_provider().ensure_configured()
     row = Session(user_id=user.id,**{**body.model_dump(),'target_language':language})
     db.add(row);db.commit()
     return session_dict(db,row)

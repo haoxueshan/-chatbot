@@ -1,5 +1,11 @@
 # 阿里云模型与协议兼容记录
 
+## 2026-11-23：ASR 生命周期与扩展接口
+
+复核官方[客户端事件](https://help.aliyun.com/zh/model-studio/qwen-audio-asr-streaming-client-events)和[服务端事件](https://help.aliyun.com/zh/model-studio/qwen-audio-asr-streaming-server-events)：默认模型、地域、握手、PCM16LE/16k/mono、韩英提示、热词和 VAD 均保持原实现。应用区分有效任务事件超时与固定收尾截止时间，不将心跳或发送完成解释为文字定稿。
+
+新增 `ASR_PROVIDER=aliyun` 接口，复用原适配器。Daglo 官方实时协议缺少可核验的逐句时间边界，本轮未实现其适配，也未猜测字段。核验日期为 2026-11-23；本轮只有文档及 Mock 验证，新增真实 API 调用为 0，未验证真实课堂效果。配置、官方依据、基准、评测门禁及部署限制见 [可靠性检查记录](ASR_RELIABILITY_2026_11.md)。
+
 ## 2026-11-03：多语言字幕翻译
 
 重新核对阿里云[机器翻译文档](https://help.aliyun.com/zh/model-studio/machine-translation)及[官方语言表](https://www.alibabacloud.com/help/en/model-studio/machine-translation)。Qwen MT 继续使用单条 user 消息、`translation_options.source_lang="auto"`、SSE；`target_lang` 现在来自固定的会话语言快照。

@@ -18,6 +18,167 @@ def install_http(monkeypatch, handler):
     monkeypatch.setattr(module.httpx, "AsyncClient", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs))
 
 
+def test_asr_factory_keeps_default_and_rejects_unimplemented_providers():
+    from app.providers.asr.factory import create_asr_provider
+    assert isinstance(create_asr_provider(config()),AliyunProvider)
+    for name in ('daglo','naver','rtzr','typo'):
+        with pytest.raises(ProviderError) as error:create_asr_provider(config(asr_provider=name))
+        assert error.value.code=='unsupported_asr_provider'
+    with pytest.raises(ProviderError) as error:
+        create_asr_provider(SimpleNamespace(asr_provider='aliyun',dashscope_api_key='')).ensure_configured()
+    assert error.value.code=='missing_api_key'
+
+
+@pytest.mark.asyncio
+async def test_asr_event_silence_is_bounded_and_releases_socket(monkeypatch):
+    task='c'*32;closed=[];pending_before=set(asyncio.all_tasks())
+    monkeypatch.setattr(module.uuid,'uuid4',lambda:SimpleNamespace(hex=task))
+    class Socket:
+        first=True
+        async def send(self,data):pass
+        async def recv(self):
+            if self.first:
+                self.first=False
+                return json.dumps({'header':{'event':'task-started','task_id':task}})
+            await asyncio.Event().wait()
+    class Context:
+        async def __aenter__(self):return Socket()
+        async def __aexit__(self,*args):closed.append(True)
+    monkeypatch.setattr(module,'connect',lambda *a,**k:Context())
+    async def audio():
+        yield bytes(640)
+        await asyncio.Event().wait()
+    with pytest.raises(ProviderError) as error:
+        async for _ in AliyunProvider(config(asr_event_timeout_seconds=.02)).stream_asr(audio()):pass
+    assert error.value.code=='asr_event_timeout' and closed==[True]
+    assert set(asyncio.all_tasks())==pending_before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('server_finished',[False,True])
+async def test_finish_deadline_also_bounds_stalled_finish_send(monkeypatch,server_finished):
+    task='f'*32;closed=[];finishing=asyncio.Event()
+    monkeypatch.setattr(module.uuid,'uuid4',lambda:SimpleNamespace(hex=task))
+    class Socket:
+        first=True
+        async def send(self,data):
+            if isinstance(data,str) and json.loads(data)['header']['action']=='finish-task':
+                finishing.set()
+                await asyncio.Event().wait()
+        async def recv(self):
+            if self.first:
+                self.first=False
+                return json.dumps({'header':{'event':'task-started','task_id':task}})
+            if server_finished:
+                await finishing.wait()
+                return json.dumps({'header':{'event':'task-finished','task_id':task}})
+            await asyncio.Event().wait()
+    class Context:
+        async def __aenter__(self):return Socket()
+        async def __aexit__(self,*args):closed.append(True)
+    monkeypatch.setattr(module,'connect',lambda *a,**k:Context())
+    async def audio():yield bytes(640)
+    async def run():
+        async for _ in AliyunProvider(config(asr_finish_timeout_seconds=.02)).stream_asr(audio()):pass
+    with pytest.raises(ProviderError) as error:await asyncio.wait_for(run(),.5)
+    assert error.value.code=='asr_finish_timeout' and closed==[True]
+
+
+@pytest.mark.asyncio
+async def test_65_minute_pcm_clock_heartbeats_order_and_cleanup(monkeypatch):
+    """195,000 real-format frames, accelerated sample clock; no network or DB."""
+    import app.ws.live as live
+    from unittest.mock import AsyncMock
+    clock=[100.];task='e'*32;total=65*60*50;count=0;closed=[]
+    started_tasks=set(asyncio.all_tasks());peak_tasks=0
+    monotonic=SimpleNamespace(monotonic=lambda:clock[0])
+    monkeypatch.setattr(module,'time',monotonic);monkeypatch.setattr(live,'time',monotonic)
+    monkeypatch.setattr(module.uuid,'uuid4',lambda:SimpleNamespace(hex=task))
+    messages=asyncio.Queue(maxsize=2);sent_batch=asyncio.Event()
+    def event(kind,sentence=None):
+        return json.dumps({'header':{'event':kind,'task_id':task},
+            'payload':{'output':{'sentence':sentence or {}}}})
+    class Socket:
+        async def send(self,data):
+            nonlocal count,peak_tasks
+            if isinstance(data,bytes):
+                assert data==(count%32768).to_bytes(2,'little')*320
+                count+=1;clock[0]=100+count*.02
+                if count%250==0:
+                    await messages.put(event('result-generated',{'heartbeat':True}))
+                if count%50==0:sent_batch.set()
+                if count%3000==0:peak_tasks=max(peak_tasks,len(asyncio.all_tasks()-started_tasks))
+            elif json.loads(data)['header']['action']=='run-task':
+                await messages.put(event('task-started'))
+            else:
+                await messages.put(event('result-generated',{'sentence_id':1,'text':'mock final',
+                    'begin_time':0,'end_time':total*20,'sentence_end':True}))
+                await messages.put(event('task-finished'))
+        async def recv(self):return await messages.get()
+    class Context:
+        async def __aenter__(self):return Socket()
+        async def __aexit__(self,*args):closed.append(True)
+    monkeypatch.setattr(module,'connect',lambda *a,**k:Context())
+    capture=live.LiveCapture(AsyncMock(),'synthetic-only','mock-user')
+    capture.mode='real';capture.ready=True;capture.started=clock[0];capture.target_language='zh-CN'
+    # A second capture has isolated queue/metrics even when sentence IDs repeat.
+    other=live.LiveCapture(AsyncMock(),'second-synthetic','mock-user')
+    finals=[]
+    async def consume():
+        provider=AliyunProvider(config(asr_event_timeout_seconds=30))
+        async for item in provider.stream_asr(capture.audio_iter(),metrics=capture.asr_metrics):finals.append(item)
+    capture.task=asyncio.create_task(consume())
+    try:
+        for base in range(0,total,50):
+            sent_batch.clear()
+            for index in range(base,base+50):await capture.audio((index%32768).to_bytes(2,'little')*320)
+            await asyncio.wait_for(sent_batch.wait(),2)
+        capture.signal_stop();await asyncio.wait_for(capture.task,2)
+    finally:
+        capture.task.cancel();await asyncio.gather(capture.task,return_exceptions=True)
+    assert count==total and capture.received_audio_ms==capture.asr_metrics['sent_audio_ms']==3900000
+    assert capture.queued_bytes==capture.queued_frames==0 and 0<capture.audio_queue_peak<=32000
+    assert capture.asr_metrics['heartbeat_events']==780 and capture.asr_metrics['transcript_events']==1
+    assert len(finals)==1 and finals[0]['final'] and finals[0]['end_ms']==3900000
+    assert not capture.failure_reported and closed==[True]
+    assert other.queue.empty() and not other.asr_metrics and other.received_audio_ms==0
+    assert peak_tasks<=8 and set(asyncio.all_tasks())==started_tasks
+    print(json.dumps({'synthetic_minutes':65,'frames':count,'queue_peak_ms':capture.audio_queue_peak/32,
+        'peak_internal_tasks':peak_tasks,'remaining_tasks':len(asyncio.all_tasks()-started_tasks),
+        'finals':len(finals),'gaps':0}))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('phase',['finish','wrong_task'])
+async def test_heartbeat_cannot_extend_finish_or_foreign_task_deadline(monkeypatch,phase):
+    task='d'*32;clock=[0.];finished=asyncio.Event();closed=[];count=[0]
+    monkeypatch.setattr(module.uuid,'uuid4',lambda:SimpleNamespace(hex=task))
+    monkeypatch.setattr(module,'time',SimpleNamespace(monotonic=lambda:clock[0]))
+    class Socket:
+        async def send(self,data):
+            if isinstance(data,str) and json.loads(data)['header']['action']=='finish-task':finished.set()
+        async def recv(self):
+            count[0]+=1
+            if count[0]==1:return json.dumps({'header':{'event':'task-started','task_id':task}})
+            if phase=='finish':await finished.wait()
+            clock[0]+=.25
+            return json.dumps({'header':{'event':'task-finished' if count[0]>=20 else 'result-generated',
+                'task_id':task if phase=='finish' or count[0]>=20 else 'foreign'},
+                'payload':{'output':{'sentence':{'heartbeat':True}}}})
+    class Context:
+        async def __aenter__(self):return Socket()
+        async def __aexit__(self,*args):closed.append(True)
+    monkeypatch.setattr(module,'connect',lambda *a,**k:Context())
+    async def audio():
+        if phase=='wrong_task':await asyncio.Event().wait()
+        yield b'\0'*640
+    metrics={}
+    with pytest.raises(ProviderError) as err:
+        async for _ in AliyunProvider(config()).stream_asr(audio(),metrics=metrics):pass
+    assert err.value.code==('asr_finish_timeout' if phase=='finish' else 'asr_event_timeout')
+    assert count[0]<=7 and closed==[True]
+
+
 @pytest.mark.asyncio
 async def test_missing_key_refuses_every_paid_entry_without_fallback():
     provider = AliyunProvider(SimpleNamespace(dashscope_api_key=""))

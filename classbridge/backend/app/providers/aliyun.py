@@ -229,6 +229,9 @@ class AliyunProvider:
         metrics.update(sent_audio_ms=0, send_wait_ms=0)
         finish_sent = False
         finish_started = False
+        finish_started_at = None
+        event_timeout = float(self.value('asr_event_timeout_seconds',None) or self.timeout)
+        finish_timeout = float(self.value('asr_finish_timeout_seconds',None) or self.timeout)
         try:
             async with connect(self.base("ws"), additional_headers=headers, open_timeout=self.timeout, close_timeout=5, max_size=2**20, max_queue=32, ping_interval=20) as ws:
                 await ws.send(json.dumps(message))
@@ -240,9 +243,10 @@ class AliyunProvider:
                 metrics['last_event_monotonic']=time.monotonic()
                 if on_ready:
                     await on_ready()
+                finishing=asyncio.get_running_loop().create_future()
 
                 async def send_audio():
-                    nonlocal finish_sent, finish_started
+                    nonlocal finish_sent, finish_started, finish_started_at
                     async for frame in audio:
                         if not frame or len(frame) % 2 or len(frame) > 32000:
                             raise ProviderError("format_error", "PCM 帧须为单声道 16 kHz int16，且不超过一秒。")
@@ -257,6 +261,8 @@ class AliyunProvider:
                         # Buffered browser packets must not starve response handling.
                         await asyncio.sleep(0)
                     finish_started=True
+                    finish_started_at=time.monotonic()
+                    finishing.set_result(None) # Recompute deadline even if finish-task send stalls.
                     await asyncio.wait_for(ws.send(json.dumps({"header": {"action": "finish-task", "task_id": task_id, "streaming": "duplex"}, "payload": {"input": {}}})),self.timeout)
                     finish_sent=True
 
@@ -265,31 +271,51 @@ class AliyunProvider:
                 # prevents reading the next upstream message in the usual case.
                 async def receive_results():
                     nonlocal receiver
+                    def remaining():
+                        deadline=(finish_started_at+finish_timeout if finish_started_at is not None
+                                  else metrics['last_event_monotonic']+event_timeout)
+                        left=deadline-time.monotonic()
+                        if left<=0:
+                            code='asr_finish_timeout' if finish_started_at is not None else 'asr_event_timeout'
+                            raise ProviderError(code,'识别服务收尾超时，已保存原文保留。' if finish_started_at is not None
+                                                else '识别服务未在时限内返回当前任务事件或心跳，已停止采集。')
+                        return left
                     while True:
+                        remaining()
                         receiver=asyncio.create_task(ws.recv())
-                        if not sender.done():
-                            done,_=await asyncio.wait({sender,receiver},timeout=self.timeout,return_when=asyncio.FIRST_COMPLETED)
-                            if not done:raise TimeoutError()
-                            if sender in done:sender.result()  # Propagate a failed send immediately.
-                        else:sender.result()
-                        data=json.loads(await asyncio.wait_for(receiver,self.timeout))
+                        while not receiver.done():
+                            if sender.done():sender.result()
+                            waiting={receiver} if sender.done() else {sender,receiver}
+                            if not finishing.done():waiting.add(finishing)
+                            done,_=await asyncio.wait(waiting,timeout=remaining(),return_when=asyncio.FIRST_COMPLETED)
+                            if sender in done:sender.result()
+                            if not done:remaining() # classify the expired deadline without restarting recv
+                        data=json.loads(receiver.result())
                         receiver=None
-                        metrics['last_event_monotonic']=time.monotonic()
                         header = data.get("header", {})
                         if header.get("task_id") != task_id:
+                            metrics['foreign_task_events']=metrics.get('foreign_task_events',0)+1
                             continue
+                        metrics['last_event_monotonic']=time.monotonic()
                         event = header.get("event")
                         if event == "task-failed":
                             raise classify_error(0, header.get("error_code", ""))
                         if event == "task-finished":
-                            if finish_started:await asyncio.wait_for(asyncio.shield(sender),self.timeout)
+                            if finish_started:
+                                try:await asyncio.wait_for(asyncio.shield(sender),remaining())
+                                except TimeoutError:
+                                    remaining() # Preserve the finish deadline's error classification.
+                                    raise
                             if not finish_sent:
                                 raise ProviderError('upstream_ended_early','识别服务提前结束了当前任务；已保存字幕保留，请手动重新开始。')
                             break
                         if event != "result-generated":
                             continue
                         sentence = data.get("payload", {}).get("output", {}).get("sentence", {})
-                        if sentence.get("heartbeat") or not sentence.get("text"):
+                        if sentence.get("heartbeat"):
+                            metrics['heartbeat_events']=metrics.get('heartbeat_events',0)+1
+                            continue
+                        if not sentence.get("text"):
                             continue
                         metrics['last_transcript_monotonic']=time.monotonic()
                         metrics['transcript_events']=metrics.get('transcript_events',0)+1
@@ -311,7 +337,7 @@ class AliyunProvider:
                         else:
                             pending.cancel();await asyncio.gather(pending,return_exceptions=True);pending=None
                 finally:
-                    tasks=[task for task in (sender,reader,receiver,pending) if task is not None]
+                    tasks=[task for task in (sender,reader,receiver,pending,finishing) if task is not None]
                     for task in tasks:task.cancel()
                     await asyncio.gather(*tasks,return_exceptions=True)
         except InvalidStatus as exc:

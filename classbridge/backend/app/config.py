@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1024
     model_timeout_seconds: float = 30
     asr_send_timeout_seconds: float = 5
+    asr_provider: str = 'aliyun'
+    asr_event_timeout_seconds: float | None = Field(default=None, gt=0, le=300)
+    asr_finish_timeout_seconds: float | None = Field(default=None, gt=0, le=300)
     # Opt-in experiment. False preserves the existing recognition/translation path.
     incremental_translation_enabled: bool = False
     preview_min_stable_seconds: float = Field(default=.35, ge=0, le=5)

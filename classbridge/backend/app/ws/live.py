@@ -64,6 +64,7 @@ class LiveCapture:
         self.dispatch_started=asyncio.Event()
         self.database_lock=asyncio.Lock()
         self.queued_frames=0
+        self.subtitle_send_wait_ms=0;self.pending_processing_tasks=0
 
     async def write_database(self,function):
         # Preserve per-capture transaction ordering, including SQLite, while
@@ -112,7 +113,9 @@ class LiveCapture:
         async def locked_send():
             async with self.send_lock:await self.ws.send_json(payload)
         # Include lock acquisition in the deadline, not only the socket write.
-        await asyncio.wait_for(locked_send(),timeout=10)
+        stamp=time.monotonic()
+        try:await asyncio.wait_for(locked_send(),timeout=10)
+        finally:self.subtitle_send_wait_ms=round((time.monotonic()-stamp)*1000,2)
 
     async def transient(self,event_type,**fields):
         payload={'type':event_type,'event_id':uid(),'event_seq':0,'session_id':self.session_id,
@@ -162,6 +165,7 @@ class LiveCapture:
                     return allowed,pending
             allowed,pending=await blocking_call(check)
             if self.stopping:continue
+            self.pending_processing_tasks=pending
             from app.providers.aliyun import ProviderError
             if not allowed:raise ProviderError('capture_state_changed','会话已停止或采集权限状态发生变化。')
             if pending>=200:raise ProviderError('task_backlog','后台待处理任务达到200项，已停止采集。')
@@ -207,6 +211,7 @@ class LiveCapture:
             self.stream_id=uid();self.mode=row.mode;self.offset=row.duration_ms;self.started=0;self.stopping=False
             self.ready=False;self.request_id=request_id
             self.asr_metrics={};self.failure_reported=False
+            self.subtitle_send_wait_ms=0;self.pending_processing_tasks=0
             self.received_audio_ms=0;self.last_audio_at=None;self.level_window.clear()
             self.preview=None
             self.unconfirmed={}
@@ -303,6 +308,10 @@ class LiveCapture:
                 'last_transcript_age_ms':int((stamp-self.asr_metrics.get('last_transcript_monotonic',self.started))*1000) if self.started else 0,
                 'sent_audio_ms':self.asr_metrics.get('sent_audio_ms',0),
                 'send_wait_ms':self.asr_metrics.get('send_wait_ms',0),
+                'subtitle_send_wait_ms':self.subtitle_send_wait_ms,
+                'pending_processing_tasks':self.pending_processing_tasks,
+                'heartbeat_events':self.asr_metrics.get('heartbeat_events',0),
+                'foreign_task_events':self.asr_metrics.get('foreign_task_events',0),
                 'last_send_age_ms':int((stamp-self.asr_metrics['last_send_monotonic'])*1000) if self.asr_metrics.get('last_send_monotonic') else None,
                 'last_upstream_event_age_ms':int((stamp-self.asr_metrics['last_event_monotonic'])*1000) if self.asr_metrics.get('last_event_monotonic') else None}
 
@@ -348,7 +357,8 @@ class LiveCapture:
                         if row and row.active_stream_id==self.stream_id:
                             row.status='processing';emit(db,row,'session.state',state='processing',status='processing',request_id=self.request_id);db.commit()
                 await self.write_database(processing)
-        try:await asyncio.wait_for(asyncio.shield(self.task),timeout=settings.model_timeout_seconds+5)
+        drain_timeout=max(settings.model_timeout_seconds,settings.asr_finish_timeout_seconds or settings.model_timeout_seconds)+5
+        try:await asyncio.wait_for(asyncio.shield(self.task),timeout=drain_timeout)
         except asyncio.TimeoutError:
             await self.fail('upstream_drain_timeout','上游收尾超时，末尾音频可能未识别。')
             self.task.cancel()
@@ -644,7 +654,7 @@ class LiveCapture:
                 await self.mark_ready()
                 await self.demo()
             else:
-                from app.providers.aliyun import AliyunProvider
+                from app.providers.asr.factory import create_asr_provider
                 from app.services.asr_options import asr_vocabulary,asr_language_hints
                 with SessionLocal() as db:
                     user=db.get(User,self.user_id)
@@ -659,7 +669,7 @@ class LiveCapture:
                     self.asr_acoustic_profile=profile if profile in ('far','near') else 'far'
                 async def recognize():
                     self.dispatch_started.set()
-                    stream=AliyunProvider().stream_asr(self.audio_iter(),on_ready=self.mark_ready,metrics=self.asr_metrics,
+                    stream=create_asr_provider().stream_asr(self.audio_iter(),on_ready=self.mark_ready,metrics=self.asr_metrics,
                         vocabulary=vocabulary,context=context,language_hints=asr_language_hints(self.asr_language_mode),
                         vad_model='near_meeting_16k' if self.asr_acoustic_profile=='near' else 'far_field_meeting_16k')
                     async with contextlib.aclosing(stream):
