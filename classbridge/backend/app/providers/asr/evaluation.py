@@ -81,12 +81,28 @@ async def evaluate_wav(provider: ASRProvider, path, *, reference=None, terms=(),
                 'accuracy':score(reference,' '.join(finals.values()),terms)}
 
 
+def evaluation_config(provider, model=None):
+    """Resolve replay-only settings without mutating shared session configuration."""
+    from app.config import Settings
+    from app.providers.aliyun import ProviderError
+    from .registry import get_provider
+    definition=get_provider(provider)
+    if definition.adapter is None:
+        raise ProviderError('unsupported_asr_provider','该 ASR 供应商尚未接入。')
+    config=Settings(asr_provider=provider)
+    resolved=model if model is not None else (config.asr_model if provider=='aliyun' else definition.default_model)
+    if not isinstance(resolved,str) or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}',resolved):
+        raise ProviderError('invalid_asr_model','模型 ID 格式无效。')
+    return config.model_copy(update={'asr_model':resolved})
+
+
 def main():
     import argparse
     import json
     from pathlib import Path
     parser=argparse.ArgumentParser(description='Explicit paid ASR WAV evaluation; no MT or automatic retry')
     parser.add_argument('wav');parser.add_argument('--provider',default='aliyun')
+    parser.add_argument('--model',help='Explicit provider model ID (no automatic fallback)')
     parser.add_argument('--reference',help='UTF-8 manually corrected reference file')
     parser.add_argument('--terms',help='UTF-8 newline-separated technical terms')
     parser.add_argument('--language',choices=('auto','ko_en','ko'),default='auto')
@@ -94,12 +110,11 @@ def main():
     args=parser.parse_args()
     if not args.allow_paid:parser.error('No API called. Real replay requires explicit --allow-paid authorization.')
     # Import settings only after explicit authorization, never for offline scoring.
-    from app.config import Settings
     from .factory import create_asr_provider
     from app.providers.aliyun import ProviderError
     from app.services.asr_options import asr_language_hints
     try:
-        provider=create_asr_provider(Settings(asr_provider=args.provider))
+        provider=create_asr_provider(evaluation_config(args.provider,args.model))
         provider.ensure_configured()
         report=asyncio.run(evaluate_wav(provider,args.wav,
             reference=Path(args.reference).read_text(encoding='utf-8') if args.reference else None,

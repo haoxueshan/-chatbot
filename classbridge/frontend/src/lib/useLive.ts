@@ -28,6 +28,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
   const [notice, setNotice] = useState("");
   const [health, setHealth] = useState<CaptureHealth>();
   const [asrLanguageMode, setAsrLanguageMode] = useState<ASRLanguageMode>();
+  const [effectiveASR, setEffectiveASR] = useState<{provider?: string; model?: string; hints?: string[]}>();
   const [asrEnhancement, setAsrEnhancement] =
     useState<BridgeEvent["asr_enhancement"]>();
   const [gaps, setGaps] = useState<BridgeEvent[]>(session.gaps || []);
@@ -54,6 +55,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
   const stop = useCallback((reason?: string) => {
     generation.current++;
     setHealth(undefined);
+    setEffectiveASR(undefined);
     clearTimeout(readyTimer.current);
     setPreparing(false);
     audio.current?.stop();
@@ -195,6 +197,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
               started.current = Date.now();
               setTranslationTarget(e.target_language || "zh-CN");
               setAsrLanguageMode(e.asr_language_mode);
+              setEffectiveASR({provider:e.asr_provider,model:e.asr_model,hints:e.asr_effective_language_hints});
               setAsrAcousticProfile(e.asr_acoustic_profile);
               setAsrEnhancement(e.asr_enhancement);
               clearTimeout(readyTimer.current);
@@ -223,6 +226,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
             captureRequest.current = null;
             activeStream.current = null;
             setHealth(undefined);
+            setEffectiveASR(undefined);
             clearTimeout(readyTimer.current);
             setPreparing(false);
             startSent.current = false;
@@ -325,6 +329,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     setNotice("");
     setHealth(undefined);
     setAsrLanguageMode(undefined);
+    setEffectiveASR(undefined);
     setAudioQuality(undefined);setAppliedAudio(undefined);
     setAsrAcousticProfile(undefined);
     setAsrEnhancement(undefined);
@@ -418,6 +423,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     notice,
     health,
     asrLanguageMode,
+    effectiveASR,
     translationTarget,
     asrEnhancement,
     setNotice,

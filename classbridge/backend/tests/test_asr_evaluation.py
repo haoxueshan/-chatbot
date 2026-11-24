@@ -6,7 +6,8 @@ import wave
 
 import pytest
 
-from app.providers.asr.evaluation import evaluate_wav, score
+from app.providers.asr.evaluation import evaluate_wav, evaluation_config, score
+from app.providers.aliyun import ProviderError
 
 
 def test_reference_metrics_and_terms_are_explicit():
@@ -67,6 +68,29 @@ async def test_wav_validation_and_stream_failure_do_not_claim_success(tmp_path):
     with wave.open(str(path),'wb') as wav:
         wav.setparams((1,2,16000,0,'NONE','not compressed'));wav.writeframes(bytes(640))
     with pytest.raises(RuntimeError,match='broken connection'):await evaluate_wav(Provider(),path,realtime=False)
+
+
+def test_evaluation_model_resolution_is_provider_specific(monkeypatch):
+    monkeypatch.setenv('ASR_MODEL', 'qwen-test-model')
+    assert evaluation_config('aliyun').asr_model == 'qwen-test-model'
+    soniox = evaluation_config('soniox')
+    assert soniox.asr_provider == 'soniox'
+    assert soniox.asr_model == 'stt-rt-v6'
+    assert evaluation_config('soniox', 'explicit-model').asr_model == 'explicit-model'
+    assert evaluation_config('aliyun', 'explicit-model').asr_model == 'explicit-model'
+    assert evaluation_config('soniox').asr_model == 'stt-rt-v6'
+
+
+@pytest.mark.parametrize('model', ['', 'bad model', '../model', 'x' * 121])
+def test_evaluation_rejects_invalid_model(model):
+    with pytest.raises(ProviderError):
+        evaluation_config('soniox', model)
+
+
+@pytest.mark.parametrize('provider', ['unknown', 'deepgram', 'elevenlabs'])
+def test_evaluation_rejects_unavailable_provider(provider):
+    with pytest.raises(ProviderError):
+        evaluation_config(provider)
 
 
 def test_cli_refuses_real_api_without_explicit_authorization():

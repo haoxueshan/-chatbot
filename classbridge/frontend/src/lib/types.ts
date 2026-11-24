@@ -146,6 +146,9 @@ export interface BridgeEvent extends Partial<Segment> {
   captured_ms?: number;
   ready?: boolean;
   request_id?: string;
+  asr_provider?: string;
+  asr_model?: string;
+  asr_effective_language_hints?: string[];
   asr_language_mode?: import("./asrLanguages").ASRLanguageMode;
   asr_acoustic_profile?: "far" | "near";
   asr_enhancement?: { hotword_count: number; weight: number; context_chars: number };

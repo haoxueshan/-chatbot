@@ -30,12 +30,12 @@ import { formatDate, formatTime, post, request } from "../lib/api";
 import { useLive } from "../lib/useLive";
 import { buildTimeline } from "../lib/timeline";
 import { recognitionStatus } from "../lib/captureHealth";
-import { asrLanguageLabels } from "../lib/asrLanguages";
 import type { Citation, Preferences, Session, Stage } from "../lib/types";
 import { Chat } from "./Chat";
 import { DocumentPreview, Library } from "./Library";
 import { Dialog } from "./ui/dialog";
 import { ASRSelector } from "./ASRModels";
+import { asrLanguageLabels } from "../lib/asrLanguages";
 
 function sourceReferences(
   item: unknown,
@@ -428,9 +428,12 @@ export function SessionView({
                 {session.mode === "demo"
                   ? `韩语 / 英语 → ${targetLabel}`
                   : live.active
-                    ? `当前识别提示：${live.preparing ? "准备中" : live.asrLanguageMode ? asrLanguageLabels[live.asrLanguageMode] : "服务端未报告"} → ${targetLabel}`
-                    : `下次识别提示：${asrLanguageLabels[preferences.asr_language_mode || "auto"]} → ${targetLabel}`}
+                    ? `当前识别提示：${live.preparing ? "准备中" : live.effectiveASR?.hints === undefined ? "服务端未报告" : live.effectiveASR.hints.length ? live.effectiveASR.hints.join(" / ") : "全部语言自动识别"} → ${targetLabel}`
+                    : `下次识别提示：${asrLanguageLabels[preferences.asr_language_mode || "auto"]}（偏好设置；实际以所选模型配置为准） → ${targetLabel}`}
               </span>
+              {live.active && live.effectiveASR?.model && (
+                <span>当前识别模型：{live.effectiveASR.provider} / {live.effectiveASR.model}</span>
+              )}
               {live.active && live.translationTarget && (
                 <span>
                   服务端目标：{translationLanguageLabel(live.translationTarget)}

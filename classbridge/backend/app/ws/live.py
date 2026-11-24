@@ -267,6 +267,8 @@ class LiveCapture:
             row.status='recording';row.duration_ms=self.offset
             emit(db,row,'session.state',state='recording',status='recording',ready=True,request_id=self.request_id,
                  offset_ms=self.offset,captured_ms=self.captured_before,asr_language_mode=self.asr_language_mode,asr_acoustic_profile=self.asr_acoustic_profile,asr_enhancement=self.asr_enhancement,
+                 **({'asr_provider':self.asr_snapshot['provider'],'asr_model':self.asr_snapshot['model_id'],
+                     'asr_effective_language_hints':list(self.asr_snapshot['language_hints'] or [])} if self.asr_snapshot else {}),
                  message='模拟演示，不调用付费 API' if self.mode=='demo' else '识别服务已就绪，可以开始说话')
             if row.retain_audio and self.mode=='real':
                 temp=Path(settings.data_dir)/'audio-temp';temp.mkdir(parents=True,exist_ok=True)
@@ -682,7 +684,7 @@ class LiveCapture:
                 async def recognize():
                     self.dispatch_started.set()
                     stream=self.asr_provider.stream_asr(self.audio_iter(),on_ready=self.mark_ready,metrics=self.asr_metrics,
-                        vocabulary=vocabulary,context=context,language_hints=asr_language_hints(self.asr_language_mode),
+                        vocabulary=vocabulary,context=context,language_hints=self.asr_snapshot['language_hints'] if self.asr_snapshot else asr_language_hints(self.asr_language_mode),
                         vad_model='near_meeting_16k' if self.asr_acoustic_profile=='near' else 'far_field_meeting_16k')
                     async with contextlib.aclosing(stream):
                         async for event in stream:await self.consume(event)
