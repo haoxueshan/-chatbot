@@ -35,6 +35,7 @@ import type { Citation, Preferences, Session, Stage } from "../lib/types";
 import { Chat } from "./Chat";
 import { DocumentPreview, Library } from "./Library";
 import { Dialog } from "./ui/dialog";
+import { ASRSelector } from "./ASRModels";
 
 function sourceReferences(
   item: unknown,
@@ -205,6 +206,8 @@ export function SessionView({
   });
   const [microphones, setMicrophones] = useState<{ deviceId: string; label: string }[]>([]);
   const [deviceError,setDeviceError]=useState("");
+  const [modelBusy,setModelBusy]=useState(false),[selectedModel,setSelectedModel]=useState(session.asr_profile_id || "");
+  useEffect(()=>setSelectedModel(session.asr_profile_id || ""),[session.id,session.asr_profile_id]);
   const deviceGeneration=useRef(0);
   const devicesMounted=useRef(true);
   const live = useLive(session, refresh, {
@@ -403,6 +406,11 @@ export function SessionView({
             <span>工具与详情</span>
           </summary>
           <div className="session-details-content">
+            {session.mode==="real" && <ASRSelector value={selectedModel} historical={session.asr_snapshot?.display_name}
+              disabled={live.active || live.settling || modelBusy || ["preparing","recording","processing"].includes(session.status)}
+              onChange={id=>{setModelBusy(true);void request(`/sessions/${session.id}/asr-profile`,{method:"PATCH",body:JSON.stringify({asr_profile_id:id})})
+                .then(()=>{setSelectedModel(id);refresh();}).catch(e=>notify(e.message)).finally(()=>setModelBusy(false));}}/>}
+            {session.asr_streams?.length ? <details><summary>历史录音模型</summary>{session.asr_streams.map(s=><p key={s.stream_id} className="tiny muted">{formatTime(s.offset_ms)} · {s.snapshot?.provider || "旧记录"} / {s.snapshot?.model_id || "未记录模型"}{s.snapshot?.provenance==="legacy_environment_assumed"?"（按升级时旧配置补记）":""}</p>)}</details> : null}
             <p className="session-full-title">{session.title}</p>
             <button
               className="back-link"
@@ -1040,7 +1048,7 @@ export function SessionView({
             <button
               className="primary capture-start"
               disabled={
-                live.settling ||
+                modelBusy || live.settling ||
                 live.connection !== "已连接" ||
                 live.elapsed >= 105 * 60 * 1000
               }

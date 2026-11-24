@@ -1,5 +1,20 @@
 import type { TargetLanguage } from "./translationLanguages";
 export type Mode = "demo" | "real";
+export interface ASRSnapshot {
+  profile_id: string; provider: string; model_id: string; display_name: string; provenance?: string;
+}
+export interface ASRValidation { valid: boolean; code: string; message: string; paid_request?: boolean }
+export interface ASRProfile {
+  id: string; provider: string; model_id: string; display_name: string;
+  language_hints: string[] | null; enabled: boolean; is_default: boolean;
+  credential_ref: string; provider_options: Record<string, unknown>;
+  validation: ASRValidation;
+}
+export interface ASRProviderInfo {
+  id: string; name: string; default_model: string; credential_ref: string;
+  implemented: boolean; status: string; capabilities: { language_hints: string[]; realtime: boolean };
+  options_schema: { properties?: Record<string, unknown> };
+}
 export type Page = "home" | "session" | "library" | "settings";
 export interface User {
   id: string;
@@ -90,6 +105,9 @@ export interface Stage {
   }[];
 }
 export interface Session {
+  asr_profile_id?: string | null;
+  asr_snapshot?: ASRSnapshot | null;
+  asr_streams?: { stream_id: string; offset_ms: number; snapshot: ASRSnapshot | null }[];
   target_language?: TargetLanguage;
   id: string;
   title: string;
@@ -173,6 +191,8 @@ export interface ChatReply {
   mode: Mode;
 }
 export interface Preferences {
+  default_asr_profile_id?: string | null;
+  aliyun_services_error?: { code:string;message:string } | null;
   asr_hotword_weight?: 2 | 3 | 4;
   asr_acoustic_profile?: "far" | "near";
   audio_processing_mode?: "standard" | "natural";

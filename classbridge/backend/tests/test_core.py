@@ -33,6 +33,9 @@ def factory(tmp_path,monkeypatch):
     monkeypatch.setattr(settings,'task_mode','disabled')
     monkeypatch.setattr(settings,'data_dir',str(tmp_path))
     monkeypatch.setattr(settings,'dashscope_api_key','')
+    monkeypatch.setattr(settings,'soniox_api_key','')
+    monkeypatch.setattr(settings,'asr_provider','aliyun')
+    monkeypatch.setattr(settings,'asr_ws_url','')
     monkeypatch.setattr(settings,'dashscope_workspace_id','')
     monkeypatch.setattr(settings,'environment','development')
     monkeypatch.setattr(settings,'cookie_secure',False)
@@ -276,6 +279,7 @@ async def test_saved_audio_is_valid_pcm_wave(factory,monkeypatch):
     from app.providers.aliyun import AliyunProvider
     from app.services.storage import get_storage
     monkeypatch.setattr(settings,'dashscope_api_key','unit-test-mocked-provider')
+    monkeypatch.setattr(settings,'dashscope_workspace_id','mock-workspace')
     async def mock_asr(self,audio,**kwargs):
         assert kwargs['vocabulary']=={'working memory':4}
         assert kwargs['context']=='인지심리학 수업. 작업기억.'
@@ -314,6 +318,7 @@ async def test_slow_asr_preparation_has_no_audio_queue_or_capture_time(factory,m
     from app.providers.aliyun import AliyunProvider
     release=asyncio.Event();ready=asyncio.Event();received=[]
     monkeypatch.setattr(settings,'dashscope_api_key','mock-only')
+    monkeypatch.setattr(settings,'dashscope_workspace_id','mock-workspace')
     async def delayed(self,audio,**kwargs):
         await release.wait()
         await kwargs['on_ready']();ready.set()
@@ -348,6 +353,7 @@ async def test_slow_asr_preparation_has_no_audio_queue_or_capture_time(factory,m
 async def test_cancel_preparing_releases_task_without_audio_or_summary(factory,monkeypatch):
     from app.providers.aliyun import AliyunProvider
     monkeypatch.setattr(settings,'dashscope_api_key','mock-only')
+    monkeypatch.setattr(settings,'dashscope_workspace_id','mock-workspace')
     cancelled=asyncio.Event();readiness=[]
     async def preparing(self,audio,**kwargs):
         try:
@@ -373,6 +379,7 @@ async def test_long_pause_preserves_evidence_offsets_without_spending_capture_li
     from app.providers.aliyun import AliyunProvider
     from app.api.sessions import session_dict
     monkeypatch.setattr(settings,'dashscope_api_key','mock-only')
+    monkeypatch.setattr(settings,'dashscope_workspace_id','mock-workspace')
     received=[]
     async def provider(self,audio,**kwargs):
         await kwargs['on_ready']()
@@ -401,6 +408,7 @@ async def test_long_pause_preserves_evidence_offsets_without_spending_capture_li
 async def test_packet_burst_does_not_starve_healthy_upstream_sender(factory,monkeypatch):
     from app.providers.aliyun import AliyunProvider
     monkeypatch.setattr(settings,'dashscope_api_key','mock-only')
+    monkeypatch.setattr(settings,'dashscope_workspace_id','mock-workspace')
     sent=[]
     async def provider(self,audio,**kwargs):
         await kwargs['on_ready']()
@@ -539,6 +547,7 @@ async def test_filetrans_keeps_old_version_and_offset(factory,monkeypatch):
 async def test_capture_health_reports_actual_audio_and_does_not_store_content(factory,monkeypatch):
     import math,struct,time
     monkeypatch.setattr(settings,'dashscope_api_key','mock-only')
+    monkeypatch.setattr(settings,'dashscope_workspace_id','mock-workspace')
     capture=live_module.LiveCapture(AsyncMock(),'lesson','alice')
     capture.mode='real';capture.ready=True;capture.started=time.monotonic()
     capture.task=asyncio.create_task(asyncio.sleep(30))

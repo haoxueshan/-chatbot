@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     model_timeout_seconds: float = 30
     asr_send_timeout_seconds: float = 5
     asr_provider: str = 'aliyun'
+    soniox_api_key: str = Field(default='', repr=False)
     asr_event_timeout_seconds: float | None = Field(default=None, gt=0, le=300)
     asr_finish_timeout_seconds: float | None = Field(default=None, gt=0, le=300)
     # Opt-in experiment. False preserves the existing recognition/translation path.

@@ -36,6 +36,7 @@ const { Sidebar, ResponsiveSidebar, Titlebar } =
   await import("../src/components/Shell.tsx");
 const { Home, NewSession } = await import("../src/components/Home.tsx");
 const { Settings } = await import("../src/components/Settings.tsx");
+const { ASRModels, ASRSelector } = await import("../src/components/ASRModels.tsx");
 const { Library } = await import("../src/components/Library.tsx");
 const { SessionView } = await import("../src/components/SessionView.tsx");
 const { default: App } = await import("../src/App.tsx");
@@ -106,6 +107,7 @@ function json(data: unknown) {
 function setupApi() {
   globalThis.fetch = async (url) =>
     json(
+      String(url).endsWith('/asr/profiles') ? [{id:'asr-default',provider:'aliyun',model_id:'qwen-test',display_name:'Mock Qwen',enabled:true,is_default:true,language_hints:null,provider_options:{},credential_ref:'DASHSCOPE_API_KEY',validation:{valid:true,code:'configured_unverified',message:'Mock configuration'}}] :
       String(url).includes("auth/me")
         ? { id: "u", username: "test" }
         : String(url).endsWith("/settings")
@@ -159,6 +161,78 @@ afterEach(async () => {
   setupApi();
 });
 after(async () => dom.happyDOM.close());
+
+test("ASR management CRUD, local checks and selectable-list refresh never silently run paid checks", async () => {
+  let profiles:any[]=[];
+  const requests:{url:string;method:string;body:any}[]=[];
+  const definitions=[
+    {id:'aliyun',name:'阿里云 Qwen',default_model:'qwen-test',credential_ref:'DASHSCOPE_API_KEY',implemented:true,options_schema:{properties:{context:{}}}},
+    {id:'soniox',name:'Soniox',default_model:'stt-rt-v6',credential_ref:'SONIOX_API_KEY',implemented:true,options_schema:{properties:{terms:{}}}},
+    {id:'deepgram',name:'Deepgram Nova-3',default_model:'nova-3',credential_ref:'DEEPGRAM_API_KEY',implemented:false,options_schema:{properties:{}}},
+  ];
+  globalThis.fetch=async(input,init)=>{
+    const url=String(input),method=init?.method || 'GET',body=init?.body?JSON.parse(String(init.body)):{};
+    requests.push({url,method,body});
+    if(url.endsWith('/providers'))return json(definitions);
+    if(url.endsWith('/validate'))return json({valid:true,message:'本地检查完成',paid_request:false});
+    const id=url.split('/').at(-1);
+    if(method==='POST')profiles.push({...body,id:'p1',validation:{valid:body.enabled,message:'本地配置有效'}});
+    if(method==='PATCH')profiles=profiles.map(p=>p.id===id?{...p,...body,validation:{valid:body.enabled??p.enabled,message:'状态已更新'}}:p);
+    if(method==='DELETE')profiles=profiles.filter(p=>p.id!==id);
+    return json(method==='GET'?profiles:profiles[0] || {ok:true});
+  };
+  const oldConfirm=globalThis.confirm;
+  globalThis.confirm=()=>true;
+  const view=await mount(h(React.Fragment,null,h(ASRModels),h(ASRSelector,{value:'',onChange(){}})));
+  const options=()=>Array.from(view.container.querySelector<HTMLSelectElement>('[aria-label="语音识别模型"]')!.options).map(o=>o.value);
+  try {
+    assert.match(view.container.textContent!,/Deepgram Nova-3：尚未接入/);
+    await click('新增模型配置');
+    const provider=document.querySelector<HTMLSelectElement>('[aria-label="ASR 供应商"]')!;
+    await act(async()=>{provider.value='soniox';provider.dispatchEvent(new Event('change',{bubbles:true}));});
+    assert.equal(document.querySelector<HTMLInputElement>('[aria-label="API 模型 ID"]')!.value,'stt-rt-v6');
+    await click('保存模型');
+    assert.equal(profiles[0].credential_ref,'SONIOX_API_KEY');
+    assert.deepEqual(options(),['','p1']);
+    assert.ok(!requests.some(r=>r.body.api_key || r.body.live===true));
+    await click('设为默认');assert.equal(profiles[0].is_default,true);
+    await click('编辑');
+    const name=document.querySelector<HTMLInputElement>('[aria-label="模型显示名称"]')!;
+    await act(async()=>{Object.getOwnPropertyDescriptor(dom.HTMLInputElement.prototype,'value')!.set!.call(name,'韩英课堂模型');name.dispatchEvent(new Event('input',{bubbles:true}));});
+    await click('保存模型');assert.equal(profiles[0].display_name,'韩英课堂模型');
+    await click('配置检查');
+    assert.deepEqual(requests.find(r=>r.url.endsWith('/validate'))!.body,{live:false,confirm_paid:false});
+    assert.match(view.container.textContent!,/本地检查完成/);
+    await click('停用');assert.deepEqual(options(),['']);
+    assert.equal(profiles[0].is_default,false);
+    await click('启用');assert.deepEqual(options(),['','p1']);
+    globalThis.confirm=()=>false;
+    await click('真实连通测试（可能计费）');
+    assert.equal(requests.filter(r=>r.url.endsWith('/validate')).length,1);
+    globalThis.confirm=()=>true;
+    await click('删除');assert.equal(profiles.length,0);assert.deepEqual(options(),['']);
+  } finally {globalThis.confirm=oldConfirm;}
+});
+
+test("ASR session selection patches only idle session and keeps the same WebSocket", async () => {
+  const fallback=globalThis.fetch;const changed:any[]=[];
+  globalThis.fetch=async(url,init)=>{
+    if(init?.method==='PATCH'){changed.push(JSON.parse(String(init.body)));return json({...other,asr_profile_id:'asr-default'});}
+    return fallback(url,init);
+  };
+  let refreshes=0;
+  const props={session:other,preferences,onActivity(){},refresh(){refreshes++;},back(){},notify(){},openSession(){},deleted(){}};
+  const view=await mount(h(SessionView,props));
+  const socket=Socket.instances.at(-1)!;
+  const select=view.container.querySelector<HTMLSelectElement>('[aria-label="语音识别模型"]')!;
+  await act(async()=>{select.value='asr-default';select.dispatchEvent(new Event('change',{bubbles:true}));});
+  assert.deepEqual(changed,[{asr_profile_id:'asr-default'}]);assert.equal(refreshes,1);
+  for(const status of ['preparing','recording','processing']){
+    await view.render(h(SessionView,{...props,session:{...other,status}}));
+    assert.equal(select.disabled,true);
+  }
+  assert.equal(Socket.instances.length,1);assert.equal(socket.closed,false);
+});
 
 for (const failure of ["backpressure", "closed", "send-throws"]) {
   test(`audio ${failure} releases capture once and rejects late frames`, async () => {
@@ -495,7 +569,8 @@ test("settings preserve all fields and classroom preset saves only on explicit s
     "语言与专业术语",
     "录音与麦克风",
     "音频与隐私",
-    "模型连接状态",
+    "阿里云翻译与知识服务",
+    "语音识别模型管理",
     "识别热词强度",
   ])
     assert.ok(view.container.textContent!.includes(label));
@@ -653,6 +728,7 @@ test("responsive presentation and tools keep one real-mode capture until explici
       assert.equal(button('删除会话').disabled,true);
       assert.equal(button('清空').disabled,true);
       assert.equal(button('本会话资料').disabled,true);
+      assert.equal(view.container.querySelector<HTMLSelectElement>('[aria-label="语音识别模型"]')!.disabled,true);
       await click('切换侧栏');
       await click('切换专注阅读');
       await click('切换专注阅读');

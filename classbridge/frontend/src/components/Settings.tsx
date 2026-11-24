@@ -17,6 +17,7 @@ import { Textarea } from "./ui/input";
 import type { Preferences } from "../lib/types";
 import { classroomPreset } from "../lib/classroomPreset";
 import { asrLanguageLabels, type ASRLanguageMode } from "../lib/asrLanguages";
+import { ASRModels } from "./ASRModels";
 export function Settings({
   preferences,
   save,
@@ -363,13 +364,13 @@ export function Settings({
               <Monitor size={21} />
             </span>
             <div>
-              <h2>模型连接状态</h2>
+              <h2>阿里云翻译与知识服务</h2>
               <p>仅显示服务器配置状态，不代表真实 API 已验证。</p>
             </div>
           </div>
           <div className="model-status">
-            <span className={`badge ${draft.real_ready ? "green" : "amber"}`}>
-              {draft.real_ready ? (
+            <span className={`badge ${draft.api_key_configured && !draft.aliyun_services_error ? "green" : "amber"}`}>
+              {draft.api_key_configured && !draft.aliyun_services_error ? (
                 <>
                   <Check size={13} />
                   已配置 · 尚未验证
@@ -383,7 +384,7 @@ export function Settings({
             </span>
           </div>
           <div className="model-table">
-            {Object.entries(draft.models || {}).map(([name, value]) => (
+            {Object.entries(draft.models || {}).filter(([name])=>name!=="asr").map(([name, value]) => (
               <div key={name}>
                 <span>
                   {{
@@ -404,14 +405,14 @@ export function Settings({
             <span>
               {draft.workspace_configured
                 ? "✓ 业务空间"
-                : draft.real_ready
+                : draft.api_key_configured && !draft.aliyun_services_error
                   ? "✓ 已使用显式接入地址"
                   : "○ 业务空间或接入地址"}
             </span>
           </div>
-          {draft.configuration_error && (
+          {draft.aliyun_services_error && (
             <p role="status" className="info-box">
-              {draft.configuration_error.message}
+              {draft.aliyun_services_error.message}
             </p>
           )}
           <p className="tiny muted">
@@ -423,6 +424,7 @@ export function Settings({
           单次录音上限为 105
           分钟，这是应用限制，不是账户消费上限。请保持页面在前台；不保证锁屏或后台录音。
         </div>
+        <ASRModels />
         <footer className="page-footer">
           <span>ClassBridge · v1.0</span>
           <span>基于 Minomeet 前端视觉体系 · MIT</span>

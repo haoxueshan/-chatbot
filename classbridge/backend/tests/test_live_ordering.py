@@ -162,6 +162,7 @@ async def test_blocked_preview_does_not_block_final_and_failure_drains(factory,m
         async def send_json(self,payload):
             partial_sent.set();await release.wait();raise RuntimeError('mock browser disconnected')
     c=LiveCapture(Socket(),'lesson','alice');c.stream_id='stream';c.mode='real'
+    c.asr_provider=AliyunProvider() # Direct run() test bypasses the profile-selection transaction.
     async def provider(self,audio,**kwargs):
         await kwargs['on_ready']()
         yield {'sentence_id':'1','text':'partial','start_ms':0,'end_ms':100,'final':False}
@@ -242,6 +243,7 @@ async def test_capture_control_events_bind_to_start_request(factory, monkeypatch
     assert capture.task is None
 
     monkeypatch.setattr(settings, 'dashscope_api_key', 'mock-provider-only')
+    monkeypatch.setattr(settings, 'dashscope_workspace_id', 'mock-workspace')
     async def provider(self, audio, **kwargs):
         await kwargs['on_ready']()
         async for frame in audio:

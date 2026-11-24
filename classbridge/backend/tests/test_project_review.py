@@ -151,6 +151,7 @@ async def test_slow_document_parse_does_not_block_audio_event_loop(factory, monk
 async def test_audio_save_failure_still_finishes_session_and_preserves_text(factory, monkeypatch):
     from app.services.storage import LocalStorage
     monkeypatch.setattr(settings,'dashscope_api_key','mock-only')
+    monkeypatch.setattr(settings,'dashscope_workspace_id','mock-workspace')
     async def provider(self,audio,**kwargs):
         await kwargs['on_ready']()
         async for _ in audio:pass

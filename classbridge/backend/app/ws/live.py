@@ -10,7 +10,7 @@ import wave
 from collections import deque
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from anyio import CancelScope
 from app.api.auth import authenticate_cookie, COOKIE_NAME
 from app.config import settings
@@ -50,6 +50,7 @@ class LiveCapture:
         self.last_backlog_check=0;self.capture_ended=None;self.queued_bytes=0
         self.ready=False;self.request_id=None;self.captured_before=0
         self.asr_metrics={};self.failure_reported=False
+        self.asr_provider=None;self.asr_snapshot=None
         self.asr_language_mode='auto'
         self.asr_acoustic_profile='far'
         self.asr_enhancement={}
@@ -195,13 +196,25 @@ class LiveCapture:
         if self.task and not self.task.done():
             await self.transient('processing.failed',request_id=request_id,code='already_recording',message='录音已经开始');return
         with SessionLocal() as db:
+            from app.services.asr_profiles import lock_owner,select
+            from app.providers.asr.factory import create_asr_provider
+            lock_owner(db,self.user_id)
             row=db.get(Session,self.session_id)
             if row.status in ('preparing','recording','processing'):
                 await self.transient('processing.failed',request_id=request_id,code='session_active',message='会话正在另一连接中录音');return
             if db.query(ProcessingTask).filter(ProcessingTask.session_id==row.id,ProcessingTask.kind=='reprocess',ProcessingTask.status.in_(['pending','retry','running'])).first():
                 await self.transient('processing.failed',request_id=request_id,code='post_processing_active',message='会后音频整理尚未完成，请等待处理结束后继续录音');return
-            if row.mode=='real' and not settings.dashscope_api_key:
-                await self.transient('processing.failed',request_id=request_id,code='missing_api_key',message='服务器未配置 DASHSCOPE_API_KEY，真实模式已拒绝');return
+            self.asr_provider=None;self.asr_snapshot=None
+            if row.mode=='real':
+                from app.providers.aliyun import ProviderError
+                try:
+                    profile,self.asr_snapshot=select(db,db.get(User,self.user_id),row.asr_profile_id)
+                    self.asr_provider=create_asr_provider(snapshot=self.asr_snapshot)
+                    self.asr_provider.ensure_configured()
+                    row.asr_profile_id=profile.id;row.asr_snapshot=self.asr_snapshot
+                except (ProviderError,HTTPException) as exc:
+                    details=exc.detail if isinstance(exc,HTTPException) else {'code':exc.code,'message':exc.message}
+                    await self.transient('processing.failed',request_id=request_id,**details);return
             self.captured_before=captured_duration_ms(db,row.id)
             if self.captured_before>=settings.capture_max_seconds*1000:
                 await self.transient('processing.failed',request_id=request_id,code='application_duration_limit',message='此会话已达到105分钟应用限制，请创建新会话');return
@@ -224,7 +237,7 @@ class LiveCapture:
             self.legacy_inputs.clear()
             self.translation_metrics=dict.fromkeys(self.translation_metrics,0)
             self.audio_id=None;self.audio_bytes=0
-            stream=RecognitionStream(id=self.stream_id,session_id=row.id,status='preparing',offset_ms=self.offset,mode=self.mode)
+            stream=RecognitionStream(id=self.stream_id,session_id=row.id,status='preparing',offset_ms=self.offset,mode=self.mode,asr_snapshot=self.asr_snapshot)
             db.add(stream);db.flush();row.active_stream_id=self.stream_id;row.status='preparing'
             emit(db,row,'session.state',state='preparing',status='preparing',request_id=self.request_id,
                  message='正在准备识别服务，请稍候再说话')
@@ -654,7 +667,6 @@ class LiveCapture:
                 await self.mark_ready()
                 await self.demo()
             else:
-                from app.providers.asr.factory import create_asr_provider
                 from app.services.asr_options import asr_vocabulary,asr_language_hints
                 with SessionLocal() as db:
                     user=db.get(User,self.user_id)
@@ -669,7 +681,7 @@ class LiveCapture:
                     self.asr_acoustic_profile=profile if profile in ('far','near') else 'far'
                 async def recognize():
                     self.dispatch_started.set()
-                    stream=create_asr_provider().stream_asr(self.audio_iter(),on_ready=self.mark_ready,metrics=self.asr_metrics,
+                    stream=self.asr_provider.stream_asr(self.audio_iter(),on_ready=self.mark_ready,metrics=self.asr_metrics,
                         vocabulary=vocabulary,context=context,language_hints=asr_language_hints(self.asr_language_mode),
                         vad_model='near_meeting_16k' if self.asr_acoustic_profile=='near' else 'far_field_meeting_16k')
                     async with contextlib.aclosing(stream):

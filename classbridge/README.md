@@ -2,6 +2,8 @@
 
 面向韩英交替课堂、会议和访谈的私人语音理解应用。React / TypeScript / Vite 前端，FastAPI 后端，生产使用 PostgreSQL + pgvector、Redis / Celery、Nginx。项目独立放在 `classbridge/`，不覆盖其他网站。
 
+2026-11-24 多 ASR 配置管理：支持阿里云与 Soniox STT v6，会话录音固定模型快照；设置页可管理模型，新建及停止后的会话可切换模型。升级须先备份、停止 API/worker，再执行 `alembic upgrade head`（0004）。配置、接口、测试和尚未实测的限制见 [ASR 模型管理](docs/ASR_MODELS.md)。Soniox 实际账号连通及课堂效果尚未验证。
+
 2026-11-03 多语言版本：字幕可选 14 种目标语言，在设置中保存默认值，新建会话时固定。已有会话保持原语言；模拟演示只支持简体中文。升级前停止 API/worker、备份数据库，安装新增 PDF 排版依赖并运行 `alembic upgrade head`（0003），再重启前后端。具体命令、测试和限制见 [多语言交付记录](docs/MULTILINGUAL_TRANSLATION.md)。本次没有调用真实模型。
 
 **当前交付：本地模拟链路已运行并验收；2026-11-01已通过真实ASR的200毫秒静音任务和单词MT请求，尚未验证真实课堂效果；Docker配置已提供，但本机没有可用Docker Engine，不能声称容器启动成功。** 最新云接口验证见 [模型兼容记录](docs/MODEL_COMPATIBILITY.md)，完整状态见 [功能清单](docs/FEATURE_STATUS.md) 与 [测试记录](docs/TEST_RESULTS.md)。

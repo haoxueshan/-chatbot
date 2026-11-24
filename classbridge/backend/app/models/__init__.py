@@ -36,6 +36,8 @@ class Session(Base):
     mode = Column(String(10), default='demo', nullable=False)
     status = Column(String(20), default='idle', nullable=False)
     target_language = Column(String(16), nullable=False, default='zh-CN', server_default='zh-CN')
+    asr_profile_id = Column(String(36), nullable=True) # Historical IDs survive deletion.
+    asr_snapshot = Column(JSON, nullable=True)
     retain_audio = Column(Boolean, default=False, nullable=False)
     duration_ms = Column(Integer, default=0, nullable=False)
     event_seq = Column(Integer, default=0, nullable=False)
@@ -52,7 +54,26 @@ class RecognitionStream(Base):
     offset_ms = Column(Integer, default=0, nullable=False)
     ended_ms = Column(Integer, nullable=True)
     mode = Column(String(10), nullable=False)
+    asr_snapshot = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), default=now, nullable=False)
+
+
+class ASRProfile(Base):
+    __tablename__ = 'asr_profiles'
+    id = idcol()
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    provider = Column(String(32), nullable=False)
+    model_id = Column(String(120), nullable=False)
+    display_name = Column(String(100), nullable=False)
+    language_hints = Column(JSON, nullable=True) # null inherits preferences; [] means auto.
+    enabled = Column(Boolean, nullable=False, default=True)
+    is_default = Column(Boolean, nullable=False, default=False)
+    credential_ref = Column(String(80), nullable=False)
+    provider_options = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+    __table_args__ = (Index('uq_asr_default_owner', 'user_id', unique=True,
+        sqlite_where=is_default.is_(True), postgresql_where=is_default.is_(True)),)
 
 
 class SegmentRevision(Base):

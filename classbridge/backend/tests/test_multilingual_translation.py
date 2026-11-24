@@ -46,8 +46,9 @@ def test_unknown_targets_are_422_not_chinese(client, invalid):
 
 @pytest.mark.parametrize('code', ['en', 'ko', 'ja'])
 def test_session_snapshot_default_explicit_and_demo_isolation(client, monkeypatch, code):
-    # Configuration validation stub only; creating a session itself never calls MT.
-    monkeypatch.setattr(AliyunProvider, 'ensure_configured', lambda self: None)
+    # Local configuration only; creating a session itself never calls MT or ASR.
+    monkeypatch.setattr(settings, 'dashscope_api_key', 'mock-provider-only')
+    monkeypatch.setattr(settings, 'dashscope_workspace_id', 'mock-workspace')
     old = client.post('/api/sessions', json={}).json()
     client.patch('/api/settings', json={'target_language':code})
     implicit = client.post('/api/sessions', json={'mode':'real'}).json()

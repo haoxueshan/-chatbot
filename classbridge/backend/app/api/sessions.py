@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from app.schemas.sessions import CreateSession, ExportRequest
 from typing import Literal
+from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session as DBSession
 from app.api.auth import current_user
@@ -38,6 +39,7 @@ def session_dict(db, row, detail=False):
     audio = db.query(AudioAsset).filter_by(session_id=row.id).all()
     result = {'id':row.id,'title':row.title,'kind':row.kind,'mode':row.mode,'status':row.status,
       'target_language':row.target_language, 'retain_audio':row.retain_audio,'created_at':row.created_at.isoformat(),'duration_ms':row.duration_ms,
+      'asr_profile_id':row.asr_profile_id,'asr_snapshot':row.asr_snapshot,
       'event_seq':row.event_seq,'active_stream_id':row.active_stream_id,'captured_ms':captured_duration_ms(db,row.id),
       'audio_status':'available' if any(a.status=='ready' for a in audio) else ('recording' if any(a.status=='writing' for a in audio) else 'not_saved')}
     if detail:
@@ -49,6 +51,7 @@ def session_dict(db, row, detail=False):
         result['unconfirmed_segments'] = unconfirmed_segments(db,row.id)
         result['stages'] = [stage_dict(s,current_versions) for s in db.query(Stage).filter_by(session_id=row.id).order_by(Stage.created_at).all()]
         result['gaps'] = [e.payload for e in db.query(Event).filter_by(session_id=row.id,type='capture.gap').order_by(Event.event_seq).all()]
+        result['asr_streams']=[{'stream_id':s.id,'offset_ms':s.offset_ms,'snapshot':s.asr_snapshot} for s in db.query(RecognitionStream).filter_by(session_id=row.id).order_by(RecognitionStream.created_at)]
         result['tasks'] = [{'id':t.id,'kind':t.kind,'status':t.status,'error':t.error} for t in db.query(ProcessingTask).filter_by(session_id=row.id).filter(ProcessingTask.kind!=RETIRED_TASK_KIND).order_by(ProcessingTask.created_at.desc()).limit(30)]
         result['audio'] = [{'id':a.id,'offset_ms':a.offset_ms,'duration_ms':a.duration_ms,'status':a.status,'expires_at':a.expires_at.isoformat(),'gaps':a.gaps} for a in audio]
     return result
@@ -71,10 +74,14 @@ def create_session(body: CreateSession,user: User=Depends(current_user),db:DBSes
     except ValueError as exc:raise HTTPException(422,detail=str(exc))
     if body.mode=='demo' and language!='zh-CN':
         raise HTTPException(422,detail={'code':'demo_language_unsupported','message':'模拟演示仅支持简体中文；其他目标语言请选择真实模式。'})
+    asr_snapshot=None
     if body.mode=='real':
-        from app.providers.asr.factory import create_asr_provider
-        create_asr_provider().ensure_configured()
+        from app.services.asr_profiles import select
+        profile,asr_snapshot=select(db,user,body.asr_profile_id)
+        body.asr_profile_id=profile.id
+    else:body.asr_profile_id=None
     row = Session(user_id=user.id,**{**body.model_dump(),'target_language':language})
+    row.asr_snapshot=asr_snapshot
     db.add(row);db.commit()
     return session_dict(db,row)
 
@@ -87,6 +94,21 @@ def get_session(session_id:str,user:User=Depends(current_user),db:DBSession=Depe
 def prevent_active(row):
     if row.status in ('preparing','recording','processing'):
         raise HTTPException(409,detail={'code':'session_active','message':'请先停止录音并等待收尾后再操作'})
+
+
+class ASRSelection(BaseModel):
+    model_config={'extra':'forbid'}
+    asr_profile_id: str=Field(min_length=1,max_length=36)
+
+
+@router.patch('/{session_id}/asr-profile')
+def change_asr(session_id:str,body:ASRSelection,user:User=Depends(current_user),db:DBSession=Depends(get_db)):
+    from app.services.asr_profiles import lock_owner,select
+    lock_owner(db,user.id);row=owned_session(db,session_id,user.id);prevent_active(row)
+    if row.mode!='real':raise HTTPException(409,detail='模拟会话不使用付费 ASR 模型')
+    profile,snapshot=select(db,user,body.asr_profile_id)
+    row.asr_profile_id=profile.id;row.asr_snapshot=snapshot
+    db.commit();return session_dict(db,row,True)
 
 
 def remove_derived(db,row):

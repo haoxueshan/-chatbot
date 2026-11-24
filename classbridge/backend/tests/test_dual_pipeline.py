@@ -18,6 +18,7 @@ import app.ws.live as live
 def capture(factory, mode='real'):
     with factory() as db:seed(db,mode=mode)
     c=LiveCapture(AsyncMock(),'lesson','alice');c.stream_id='stream';c.mode=mode;c.started=time.monotonic()
+    c.asr_provider=AliyunProvider() # These unit tests bypass start(); inject the mocked provider explicitly.
     return c
 
 

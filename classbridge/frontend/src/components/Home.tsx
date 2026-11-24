@@ -1,5 +1,7 @@
 import { translationLanguages, type TargetLanguage } from "../lib/translationLanguages";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useASRProfiles } from "../lib/asrProfiles";
+import { ASRSelector } from "./ASRModels";
 import {
   ArrowRight,
   AudioLines,
@@ -278,6 +280,7 @@ export function NewSession({
     mode: Mode;
     retain_audio: boolean;
     target_language: TargetLanguage;
+    asr_profile_id?: string;
   }) => Promise<void>;
   defaultRetain?: boolean;
   defaultTarget?: TargetLanguage;
@@ -290,6 +293,9 @@ export function NewSession({
     [target, setTarget] = useState<TargetLanguage>(defaultTarget),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const {profiles}=useASRProfiles();
+  const [asrProfile,setASRProfile]=useState("");
+  useEffect(()=>{if(!asrProfile){const profile=profiles.find(p=>p.is_default && p.enabled && p.validation.valid);if(profile)setASRProfile(profile.id);}},[profiles,asrProfile]);
   return (
     <Dialog
       title="新建会话"
@@ -317,6 +323,7 @@ export function NewSession({
           e.preventDefault();
           if (busy) return;
           if (mode === "demo" && target !== "zh-CN") { setError("模拟演示仅支持简体中文，请选择真实课堂或简体中文。"); return; }
+          if (mode === "real" && !profiles.some(p=>p.id===asrProfile && p.enabled && p.validation.valid)) {setError("请选择已启用且配置有效的 ASR 模型。");return;}
           setBusy(true);
           setError("");
           try {
@@ -328,6 +335,7 @@ export function NewSession({
               mode,
               retain_audio: retain,
               target_language: target,
+              ...(mode==="real"?{asr_profile_id:asrProfile}:{}),
             });
           } catch (err) {
             setError(err instanceof Error ? err.message : "创建失败");
@@ -336,6 +344,7 @@ export function NewSession({
         }}
       >
         <fieldset disabled={busy} className="new-session-fields">
+          {mode==="real" && <ASRSelector value={asrProfile} onChange={setASRProfile} disabled={busy}/>}
           <div className="segmented">
             {[
               ["classroom", "课堂"],

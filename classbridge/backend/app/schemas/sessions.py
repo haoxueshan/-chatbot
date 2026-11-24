@@ -9,6 +9,7 @@ class CreateSession(BaseModel):
     mode: Literal['demo', 'real'] = 'demo'
     retain_audio: bool = False
     target_language: SupportedTargetLanguage = 'zh-CN'
+    asr_profile_id: str | None = Field(default=None,max_length=36)
 
 
 class ExportRequest(BaseModel):

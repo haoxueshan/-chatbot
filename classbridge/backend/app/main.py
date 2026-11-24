@@ -5,6 +5,8 @@ from collections import defaultdict,deque
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from sqlalchemy import text
 from app.config import settings
 from app.db import SessionLocal, init_db
@@ -47,10 +49,18 @@ app=FastAPI(title=settings.app_name,version='1.0.0',lifespan=lifespan,docs_url='
 windows=defaultdict(deque)
 
 
+@app.exception_handler(RequestValidationError)
+async def safe_asr_validation(request,exc):
+    if request.url.path.startswith('/api/asr/'):
+        # Do not reflect a secret mistakenly pasted into an unknown model field.
+        return JSONResponse(status_code=422,content={'detail':{'code':'invalid_asr_profile','message':'模型字段无效；不接受密钥正文、URL 或未知字段。'}})
+    return await request_validation_exception_handler(request,exc)
+
+
 from app.providers.aliyun import ProviderError
 @app.exception_handler(ProviderError)
 async def provider_error_handler(request,exc):
-    status=503 if exc.code in ('missing_api_key','missing_workspace','invalid_endpoint','region_mismatch','model_permission','model_unavailable') else (429 if exc.code=='rate_limited' else 502)
+    status=409 if exc.code=='asr_profile_disabled' else (503 if exc.code in ('missing_api_key','missing_workspace','invalid_endpoint','region_mismatch','model_permission','model_unavailable','unsupported_asr_provider') else (429 if exc.code=='rate_limited' else 502))
     return JSONResponse(status_code=status,content={'detail':{'code':exc.code,'message':exc.message}})
 
 
@@ -61,7 +71,7 @@ async def security(request:Request,call_next):
         if origin not in settings.origins:
             return JSONResponse(status_code=403,content={'detail':{'code':'origin_forbidden','message':'请求来源不受信任'}})
     if request.url.path.startswith('/api/') and request.url.path!='/api/health':
-        category='login' if request.url.path=='/api/auth/login' else ('model' if request.url.path.endswith('/chat') else 'api')
+        category='login' if request.url.path=='/api/auth/login' else ('model' if request.url.path.endswith(('/chat','/validate')) else 'api')
         key=(request.client.host if request.client else 'unknown',category)
         stamp=time.monotonic();queue=windows[key]
         while queue and queue[0]<stamp-60:queue.popleft()
@@ -87,8 +97,10 @@ def health():
 from app.api.auth import router as auth_router
 from app.api.sessions import router as sessions_router
 from app.api.settings import router as settings_router
+from app.api.asr import router as asr_router
 from app.ws.live import router as ws_router
 app.include_router(auth_router);app.include_router(sessions_router);app.include_router(settings_router);app.include_router(ws_router)
+app.include_router(asr_router)
 try:
     from app.api.knowledge import router as knowledge_router
     app.include_router(knowledge_router)
