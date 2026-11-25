@@ -118,7 +118,8 @@ export function Sidebar({
           </button>
         ))}
       </nav>
-      {folderNavigation && !collapsed && <FolderNavigation {...folderNavigation}
+      <div className="sidebar-scroll">
+      {folderNavigation && !collapsed && <FolderNavigation {...folderNavigation} variant="sidebar"
         select={id => go(() => folderNavigation.select(id))}
         manage={() => go(folderNavigation.manage)} />}
       <div className="sidebar-label">
@@ -150,6 +151,7 @@ export function Sidebar({
           </button>
         ))}
         {!sessions.length && <p className="muted tiny">暂无已保存的会话</p>}
+      </div>
       </div>
       <div className="private-card">
         <ShieldCheck size={18} />

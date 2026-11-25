@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright-core');
 const phase = process.argv[2] || 'after';
-const output = resolve('../docs/screenshots/responsive');
+const output = resolve(process.env.AUDIT_OUTPUT || '../docs/screenshots/responsive');
 await mkdir(output, { recursive: true });
 const preferences = { theme: 'light', subtitle_size: 24, show_original: true, retain_audio: false,
   audio_retention_days: 7, terms: [], target_language: 'zh-CN', asr_language_mode: 'auto' };

@@ -6,6 +6,7 @@ import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input, Textarea } from "./ui/input";
 import { Dialog } from "./ui/dialog";
+import { Badge } from "./ui/badge";
 
 export function ASRSelector({value,onChange,disabled=false,historical}: {
   value:string;onChange:(id:string)=>void;disabled?:boolean;historical?:string;
@@ -25,7 +26,7 @@ export function ASRSelector({value,onChange,disabled=false,historical}: {
 
 type Draft=Pick<ASRProfile,"provider"|"model_id"|"display_name"|"language_hints"|"enabled"|"is_default"|"credential_ref"|"provider_options">;
 export function ASRModels() {
-  const {profiles,error}=useASRProfiles();
+  const {profiles,error,loading}=useASRProfiles();
   const [providers,setProviders]=useState<ASRProviderInfo[]>([]),[message,setMessage]=useState("");
   const [draft,setDraft]=useState<Draft|null>(null),[editing,setEditing]=useState<string|null>(null),[options,setOptions]=useState("{}");
   const [busy,setBusy]=useState(false);
@@ -46,12 +47,15 @@ export function ASRModels() {
     const result=await post<ASRValidation>(`/asr/profiles/${profile.id}/validate`,{live,confirm_paid:live});
     setMessage(result.message);
   });
-  return <Card className="settings-card asr-models">
+  return <Card id="settings-asr" tabIndex={-1} className="settings-card asr-models">
     <div className="settings-title"><div><h2>语音识别模型管理</h2><p>密钥只在服务器配置。阿里云翻译与知识服务独立保留。</p></div></div>
     <Button disabled={busy || !providers.length} onClick={()=>{setEditing(null);chooseProvider(providers[0]);}}>新增模型配置</Button>
-    {(error || message) && <p role="status" className="info-box">{error || message}</p>}
+    {error && <p role="alert" className="error-box">{error}</p>}
+    {message && <p role="status" className="info-box">{message}</p>}
+    {loading && <p role="status" className="model-loading" aria-busy="true">正在加载模型配置…</p>}
+    {!loading && !error && !profiles.length && <div className="empty-state compact"><h3>尚未添加识别模型</h3><p>新增模型配置后，即可在真实会话中选择。密钥保存在服务器。</p></div>}
     {profiles.map(p=><section key={p.id} className="asr-profile-row" aria-label={p.display_name}>
-      <strong>{p.display_name}{p.is_default?" · 默认":""}</strong>
+      <div className="asr-profile-heading"><strong>{p.display_name}</strong>{p.is_default && <Badge>默认</Badge>}<Badge className={p.enabled && p.validation.valid ? "green" : "amber"}>{!p.enabled ? "已停用" : p.validation.valid ? "本地配置有效" : "待配置"}</Badge></div>
       <p><code>{p.provider} / {p.model_id}</code> · {p.language_hints===null?"跟随课堂语言提示":p.language_hints.join(" / ") || "自动识别"}</p>
       <p className="tiny muted">{p.enabled?"已启用":"已停用"} · {p.validation.message}</p>
       <div className="asr-actions">

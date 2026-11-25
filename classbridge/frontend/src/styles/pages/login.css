@@ -7,42 +7,24 @@
   background: var(--cb-panel);
 }
 .login-story {
-  background: #34316c;
-  color: white;
+  background: hsl(var(--muted));
+  color: var(--cb-text);
   padding: 40px 48px;
   display: flex;
   flex-direction: column;
   position: relative;
   overflow: hidden;
 }
-.login-story:before,
-.login-story:after {
-  content: "";
-  position: absolute;
-  width: 660px;
-  height: 660px;
-  border: 1px solid #ffffff16;
-  border-radius: 50%;
-  left: -310px;
-  top: 32%;
-  pointer-events: none;
-}
-.login-story:after {
-  width: 890px;
-  height: 890px;
-  left: -425px;
-  top: calc(32% - 115px);
-}
 .brand.light {
-  color: white;
+  color: var(--cb-text);
   z-index: 1;
 }
 .brand.light small {
-  color: #e5dffa9c;
+  color: var(--cb-muted);
 }
 .brand.light .brand-icon {
-  background: #ffffff1f;
-  border: 1px solid #ffffff30;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
   box-shadow: none;
 }
 .login-main {
@@ -53,7 +35,7 @@
   padding: 60px 0;
 }
 .eyebrow.light {
-  color: #d6cef9;
+  color: var(--cb-accent);
   font-size: 10px;
   letter-spacing: 2px;
 }
@@ -61,45 +43,44 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #e0d5fa;
+  background: hsl(var(--primary));
 }
 .login-main h1 {
-  font-size: 42px;
+  font-size: 36px;
   font-weight: 600;
   line-height: 1.5;
   letter-spacing: 1px;
   margin-top: 18px;
 }
 .login-main > p {
-  color: #e5defa;
+  color: var(--cb-muted);
   font-size: 13px;
   line-height: 2;
   margin-top: 19px;
 }
 .sample-caption {
-  background: linear-gradient(130deg, #ffffff18, #ffffff09);
-  border: 1px solid #ffffff35;
+  background: var(--cb-panel);
+  border: 1px solid var(--cb-border);
   padding: 21px;
-  border-radius: 13px;
+  border-radius: var(--radius);
   margin: 35px 0 27px;
-  box-shadow: 0 12px 35px #45348610;
-  backdrop-filter: blur(4px);
+  box-shadow: none;
 }
 .sample-caption > div {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #ded3f9;
+  color: var(--cb-muted);
 }
 .sample-caption .tag {
   font-size: 10px;
   border-radius: 4px;
-  background: #ffffff15;
+  background: hsl(var(--muted));
   padding: 4px 7px;
 }
 .sample-caption p {
   font-size: 10px;
-  color: #dcd5ed;
+  color: var(--cb-muted);
   margin: 20px 0 9px;
 }
 .sample-caption strong {
@@ -112,13 +93,13 @@
   height: 2px;
   width: 45%;
   margin-top: 20px;
-  background: linear-gradient(90deg, #cdbaf8, #ffffff00);
+  background: var(--cb-border);
 }
 .feature-row {
   display: flex;
   justify-content: space-between;
   font-size: 10px;
-  color: #dfd7f4;
+  color: var(--cb-muted);
 }
 .feature-row > span {
   display: flex;
@@ -129,7 +110,7 @@
   position: relative;
   z-index: 1;
   font-size: 10px;
-  color: #dfd9f5a1;
+  color: var(--cb-muted);
   letter-spacing: 1px;
 }
 .login-form {
@@ -146,7 +127,7 @@
   width: 53px;
   height: 53px;
   background: var(--cb-accent-soft);
-  color: #8b7ed0;
+  color: var(--cb-accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -198,7 +179,7 @@
 .login-note > svg {
   flex: none;
   margin-top: 4px;
-  color: #a39ab6;
+  color: var(--cb-muted);
 }
 .login-note p {
   font-size: 10px;
@@ -211,7 +192,7 @@
 @media (max-width: 1024px) {
   .login-story {
     padding: 33px;
-    background: #34316c;
+    background: hsl(var(--muted));
   }
   .login-main h1 {
     font-size: 36px;
@@ -241,7 +222,7 @@
   }
   .login-story {
     padding: 28px 28px 26px;
-    background: #34316c;
+    background: hsl(var(--muted));
   }
   .login-story > .brand {
     font-size: 18px;

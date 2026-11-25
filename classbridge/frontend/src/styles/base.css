@@ -43,7 +43,7 @@ body {
     BlinkMacSystemFont,
     sans-serif;
   color: var(--cb-text);
-  font-size: 14px;
+  font-size: var(--cb-font-body);
 }
 button,
 a,
@@ -67,9 +67,12 @@ button {
     border 0.15s,
     opacity 0.15s;
 }
-button:disabled {
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
   cursor: not-allowed;
-  opacity: 0.4;
+  opacity: var(--cb-disabled-opacity);
 }
 button:focus-visible,
 a:focus-visible,
@@ -86,7 +89,7 @@ select {
   color: var(--cb-text);
   background: var(--cb-panel);
   border: 1px solid var(--cb-border);
-  border-radius: 9px;
+  border-radius: var(--radius);
   padding: 11px 13px;
 }
 input:focus,
@@ -96,13 +99,18 @@ select:focus {
   box-shadow: 0 0 0 3px hsl(var(--ring) / 0.16);
 }
 input[type="checkbox"] {
-  accent-color: #6355d9;
+  accent-color: hsl(var(--primary));
   width: 17px;
   height: 17px;
   flex: none;
 }
 textarea {
   resize: vertical;
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--cb-muted);
+  opacity: 1;
 }
 a {
   color: inherit;

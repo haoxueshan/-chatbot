@@ -591,13 +591,53 @@ test("batch selection retains failed moves, clears successful moves and resets o
   succeeds = true;
   await click("移动所选会话");
   assert.equal(check().checked, false);
-  assert.equal(button("移动所选会话").disabled, true);
+  assert.equal(view.container.querySelector('[aria-label="批量移动目标文件夹"]'), null);
   await act(async () => check().click());
   await view.render(h(Home, { ...props, search: "新搜索" }));
   assert.equal(check().checked, false);
   await act(async () => check().click());
   await view.render(h(Home, { ...props, folderNavigation: { ...props.folderNavigation, selected: "course" } }));
   assert.equal(check().checked, false);
+});
+
+test("sidebar folders collapse without changing selection and respect recording lock", async () => {
+  const calls: string[] = [];
+  const props = { variant: "sidebar" as const, folders: [{id:"course",name:"韩英课程",session_count:3,created_at:"",updated_at:""}],
+    selected:"course",select:(id:string)=>calls.push(id),manage:()=>calls.push("manage") };
+  const view=await mount(h(FolderNavigation,props));
+  assert.equal(button("韩英课程").getAttribute("aria-current"),"true");
+  await click("收起文件夹");
+  assert.equal(view.container.querySelector<HTMLElement>('.folder-sidebar-list')!.hidden,true);
+  assert.deepEqual(calls,[]);
+  assert.equal(view.container.querySelector('.folder-context')!.textContent,"韩英课程");
+  await click("展开文件夹");await click("未分类");
+  assert.deepEqual(calls,["unfiled"]);
+  await view.render(h(FolderNavigation,{...props,disabled:true}));
+  assert.equal(button("韩英课程").disabled,true);assert.equal(button("管理文件夹").disabled,true);
+});
+
+test("session actions retain move semantics and Escape returns focus without opening session", async () => {
+  let opens=0;const moves:unknown[]=[];
+  const view=await mount(h(Home,{sessions:[lesson],search:"",setSearch(){},create(){},select(){opens++;},library(){},settings(){},
+    folderNavigation:{folders:[{id:"course",name:"课程",session_count:0,created_at:"",updated_at:""}],selected:"",select(){},manage(){}},
+    moveSession:async(id:string,folder:string)=>{moves.push([id,folder]);}}));
+  const details=view.container.querySelector<HTMLDetailsElement>('.session-row-tools')!;
+  details.open=true;
+  const target=details.querySelector('select')!;
+  await act(async()=>{target.value="course";target.dispatchEvent(new Event("change",{bubbles:true}));});
+  assert.deepEqual(moves,[["lesson","course"]]);assert.equal(opens,0);
+  await act(async()=>target.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));
+  assert.equal(details.open,false);assert.equal(document.activeElement,details.querySelector('summary'));
+});
+
+test("settings section navigation keeps unsaved subtitle preferences and focuses the target", async () => {
+  const view=await mount(h(Settings,{preferences,save:async()=>{}}));
+  const slider=view.container.querySelector<HTMLInputElement>('input[type="range"]')!;
+  await act(async()=>{slider.value="32";slider.dispatchEvent(new Event("change",{bubbles:true}));});
+  const target=view.container.querySelector<HTMLElement>('#settings-asr')!;
+  let scrolls=0;target.scrollIntoView=()=>{scrolls++;};
+  await click("识别模型");
+  assert.equal(document.activeElement,target);assert.equal(scrolls,1);assert.equal(slider.value,"32");
 });
 
 test("new-session dialog blocks dismissal while submitting and preserves create payload", async () => {

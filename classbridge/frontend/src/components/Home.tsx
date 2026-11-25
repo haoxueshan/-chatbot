@@ -159,7 +159,7 @@ export function Home({
           <div className="section-heading">
             <div>
               <h2>
-                最近会话 <span className="count-pill">{sessions.length}</span>
+                {folderNavigation?.selected === "unfiled" ? "未分类" : folderNavigation?.folders.find(f => f.id === folderNavigation.selected)?.name || "最近会话"} <span className="count-pill">{sessions.length}</span>
               </h2>
               <p>打开已保存的字幕、摘要与资料。</p>
             </div>
@@ -184,7 +184,7 @@ export function Home({
             </label>
           </div>
           {folderNavigation && moveSessions && sessions.length > 0 && (
-            <div className="folder-batch-actions" role="group" aria-label="批量移动会话">
+            <div className={`folder-batch-actions${visibleIds.length ? " has-selection" : ""}`} role="group" aria-label="批量移动会话">
               <label>
                 <input type="checkbox" aria-label="选择前100个会话"
                   disabled={batchDisabled}
@@ -192,7 +192,8 @@ export function Home({
                   onChange={e => setSelectedIds(e.target.checked ? sessions.slice(0, 100).map(s => s.id) : [])} />
                 选择当前列表（最多100个）
               </label>
-              <span role="status">已选 {visibleIds.length} 个</span>
+              <span role="status">{visibleIds.length ? `已选 ${visibleIds.length} 个` : "选择会话后可批量移动"}</span>
+              {visibleIds.length > 0 && <>
               <select aria-label="批量移动目标文件夹" value={destination} disabled={batchDisabled}
                 onChange={e => setDestination(e.target.value)}>
                 <option value="">未分类</option>
@@ -201,6 +202,11 @@ export function Home({
               <Button disabled={batchDisabled || !visibleIds.length} onClick={async () => {
                 if (await moveSessions(visibleIds, destination)) setSelectedIds([]);
               }}>移动所选会话</Button>
+              <Button variant="ghost" disabled={batchDisabled} onClick={e => {
+                e.currentTarget.closest('.folder-batch-actions')?.querySelector<HTMLInputElement>('input')?.focus();
+                setSelectedIds([]);
+              }}>取消选择</Button>
+              </>}
             </div>
           )}
           {sessions.length ? (
@@ -211,14 +217,14 @@ export function Home({
                 <span>状态</span>
               </div>
               {sessions.map((session) => (
-                <div key={session.id}>
-                {moveSessions && <label>
+                <div key={session.id} className={`session-entry${visibleIds.includes(session.id) ? " is-selected" : ""}`}>
+                {moveSessions && <label className="session-select">
                   <input type="checkbox" aria-label={`选择会话：${session.title}`}
                     checked={visibleIds.includes(session.id)}
                     disabled={batchDisabled || (!visibleIds.includes(session.id) && visibleIds.length >= 100)}
                     onChange={e => setSelectedIds(e.target.checked
                       ? [...visibleIds, session.id] : visibleIds.filter(id => id !== session.id))} />
-                  选择
+                  <span className="sr-only">选择</span>
                 </label>}
                 <button
                   className="session-row"
@@ -265,7 +271,11 @@ export function Home({
                   </span>
                   <ChevronRight size={16} />
                 </button>
-                {folderNavigation && moveSession && <label>
+                {folderNavigation && moveSession && <details className="session-row-tools"
+                  onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) e.currentTarget.open = false; }}
+                  onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.currentTarget.open = false; e.currentTarget.querySelector("summary")?.focus(); } }}>
+                  <summary aria-label={`会话操作：${session.title}`} title="会话操作"><span aria-hidden="true">•••</span></summary>
+                  <label className="session-move">
                   移动到
                   <select aria-label={`移动会话：${session.title}`}
                     value={session.folder_id || ""}
@@ -275,7 +285,7 @@ export function Home({
                     {folderNavigation.folders.map(folder =>
                       <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                   </select>
-                </label>}
+                </label></details>}
                 </div>
               ))}
             </div>

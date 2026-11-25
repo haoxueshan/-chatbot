@@ -1,0 +1,182 @@
+{
+  "metrics": [
+    {
+      "label": "home",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": 203.796875
+    },
+    {
+      "label": "settings",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "library",
+      "width": 320,
+      "height": 568,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "home",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": 203.796875
+    },
+    {
+      "label": "settings",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "library",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "home",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": 171
+    },
+    {
+      "label": "settings",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "library",
+      "width": 844,
+      "height": 390,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "home",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": 171
+    },
+    {
+      "label": "settings",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "library",
+      "width": 768,
+      "height": 1024,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "home",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": 171
+    },
+    {
+      "label": "settings",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "library",
+      "width": 1024,
+      "height": 768,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "home",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": 150
+    },
+    {
+      "label": "settings",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "library",
+      "width": 1280,
+      "height": 800,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "home",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": 150
+    },
+    {
+      "label": "settings",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "library",
+      "width": 1440,
+      "height": 900,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": null
+    },
+    {
+      "label": "navigation",
+      "width": 390,
+      "height": 844,
+      "overflow": false,
+      "bodyOverflow": false,
+      "rowHeight": 203.796875
+    }
+  ],
+  "errors": [],
+  "paidModelRequests": 0
+}

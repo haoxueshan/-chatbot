@@ -10,7 +10,11 @@
   border-radius: var(--radius);
   padding: 24px;
   margin-top: 20px;
+  scroll-margin-block: var(--cb-space-4);
 }
+.settings-navigation { display: flex; flex-wrap: wrap; gap: var(--cb-space-1); padding-bottom: var(--cb-space-3); border-bottom: 1px solid var(--cb-border); }
+.settings-navigation button { min-height: 44px; padding: var(--cb-space-2) var(--cb-space-3); border-radius: var(--cb-radius-sm); color: var(--cb-muted); font-size: var(--cb-font-sm); }
+.settings-navigation button:hover { color: var(--cb-text); background: var(--cb-hover); }
 .settings-title {
   display: flex;
   align-items: center;
@@ -72,7 +76,7 @@
 .range-control input {
   width: 135px;
   padding: 0;
-  accent-color: #a68acb;
+  accent-color: hsl(var(--primary));
   box-shadow: none;
 }
 .subtitle-preview {
@@ -113,7 +117,7 @@
   height: 20px;
   padding: 0;
   border-radius: 12px;
-  background: #dcd9e5;
+  background: hsl(var(--input));
   position: relative;
   border: none;
   cursor: pointer;
@@ -124,11 +128,11 @@
   position: absolute;
   top: 3px;
   left: 3px;
-  background: white;
+  background: hsl(var(--primary-foreground));
   border-radius: 50%;
   width: 14px;
   height: 14px;
-  box-shadow: 0 1px 3px #0001;
+  box-shadow: var(--cb-shadow);
   transition: transform 0.2s;
 }
 .settings-row .switch:checked {
@@ -291,6 +295,10 @@
 /* Model administration uses the existing settings tokens and controls. */
 .asr-profile-row { padding: 16px 0; border-bottom: 1px solid var(--cb-border); overflow-wrap: anywhere; }
 .asr-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.asr-profile-heading { display: flex; align-items: center; flex-wrap: wrap; gap: var(--cb-space-2); margin-bottom: var(--cb-space-2); }
+.asr-profile-heading strong { min-width: 0; overflow-wrap: anywhere; }
+.asr-profile-row > p { margin-bottom: var(--cb-space-2); }
+.model-loading { padding: var(--cb-space-5); background: hsl(var(--muted)); border-radius: var(--radius); margin-top: var(--cb-space-3); color: var(--cb-muted); font-size: var(--cb-font-sm); }
 .asr-profile-form fieldset { border: 0; padding: 0; display: grid; gap: 12px; min-width: 0; }
 .asr-profile-form label:not(.checkbox-label) { display: grid; gap: 6px; }
 .asr-profile-form select, .asr-profile-form textarea { width: 100%; min-width: 0; }

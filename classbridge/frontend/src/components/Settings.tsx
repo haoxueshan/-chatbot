@@ -60,12 +60,22 @@ export function Settings({
             {busy ? "保存中…" : "保存偏好"}
           </Button>
         </div>
+        <nav className="settings-navigation" aria-label="设置分组">
+          {[["appearance", "外观与阅读"], ["language", "语言与术语"], ["microphone", "麦克风"],
+            ["privacy", "音频与隐私"], ["services", "翻译与知识"], ["asr", "识别模型"]].map(([id, label]) => (
+            <button key={id} onClick={() => {
+              const section = document.getElementById(`settings-${id}`);
+              section?.focus({preventScroll: true});
+              section?.scrollIntoView({block: "start"});
+            }}>{label}</button>
+          ))}
+        </nav>
         {message && (
           <div role="status" className="info-box">
             {message}
           </div>
         )}
-        <Card className="settings-card">
+        <Card id="settings-appearance" tabIndex={-1} className="settings-card">
           <div className="settings-title">
             <span className="quick-icon purple">
               <SlidersHorizontal size={21} />
@@ -138,7 +148,7 @@ export function Settings({
             />
           </label>
         </Card>
-        <Card className="settings-card">
+        <Card id="settings-language" tabIndex={-1} className="settings-card">
           <div className="settings-title">
             <span className="quick-icon blue">
               <Languages size={21} />
@@ -264,7 +274,7 @@ export function Settings({
             </small>
           </label>
         </Card>
-        <Card className="settings-card">
+        <Card id="settings-microphone" tabIndex={-1} className="settings-card">
           <div className="settings-title">
             <span className="quick-icon orange">
               <ShieldCheck size={21} />
@@ -320,7 +330,7 @@ export function Settings({
             </select>
           </label>
         </Card>
-        <Card className="settings-card">
+        <Card id="settings-privacy" tabIndex={-1} className="settings-card">
           <div className="settings-title">
             <span className="quick-icon">
               <ShieldCheck size={21} />
@@ -358,7 +368,7 @@ export function Settings({
             </span>
           </div>
         </Card>
-        <Card className="settings-card">
+        <Card id="settings-services" tabIndex={-1} className="settings-card">
           <div className="settings-title">
             <span className="quick-icon purple">
               <Monitor size={21} />

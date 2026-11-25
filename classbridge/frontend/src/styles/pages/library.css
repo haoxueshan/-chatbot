@@ -1,9 +1,9 @@
 /* ClassBridge / Minomeet MIT styles, migrated by responsibility. */
 .upload-zone {
   background: var(--cb-panel);
-  border: 1px dashed #d0c6e3;
-  border-radius: 12px;
-  min-height: 200px;
+  border: 1px dashed hsl(var(--input));
+  border-radius: var(--radius);
+  min-height: 164px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -16,7 +16,7 @@
 .upload-zone .empty-icon {
   width: 52px;
   height: 52px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   margin-bottom: 13px;
 }
 .upload-zone h3 {
@@ -165,7 +165,7 @@
 }
 .source-quote {
   background: var(--cb-accent-soft);
-  border-left: 3px solid #b6a1d4;
+  border-left: 3px solid hsl(var(--ring));
   padding: 12px 15px;
   font-size: 12px;
   line-height: 1.9;
@@ -184,7 +184,7 @@
 @media (max-width: 680px) {
   .upload-zone {
     padding: 23px 15px;
-    min-height: 200px;
+    min-height: 164px;
     border-color: hsl(var(--input));
   }
   .upload-zone h3 {

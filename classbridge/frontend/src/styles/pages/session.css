@@ -99,7 +99,7 @@
   gap: 15px;
   font-size: 12px;
   padding: 10px 13px;
-  border: 1px solid #eae1c8;
+  border: 1px solid hsl(var(--warning-foreground) / 0.2);
   border-radius: 8px;
   background: hsl(var(--warning));
   color: hsl(var(--warning-foreground));
@@ -201,7 +201,7 @@
 }
 .audio-mark i {
   width: 2px;
-  background: #9484cb;
+  background: hsl(var(--primary));
   border-radius: 1px;
   height: 6px;
 }
@@ -325,7 +325,8 @@
   gap: 14px;
 }
 .empty-mic {
-  background: radial-gradient(circle, #f0ebfd 0%, #f8f6fe 65%, #fff0 66%);
+  background: hsl(var(--muted));
+  border-radius: 50%;
   color: var(--cb-soft);
   width: 95px;
   height: 95px;
@@ -339,11 +340,7 @@
   position: absolute;
   width: 77px;
   height: 77px;
-  border: 1px solid #ebe4f7;
-  border-radius: 50%;
-}
-.dark .empty-mic {
-  background: #322c43;
+  border: 1px solid var(--cb-border);
   border-radius: 50%;
 }
 .subtitle-empty > .eyebrow {
@@ -410,16 +407,16 @@
   background: var(--cb-panel);
   color: var(--cb-accent);
   padding: 9px 15px;
-  border: 1px solid #d6cdef;
+  border: 1px solid var(--cb-border);
   border-radius: 30px;
-  box-shadow: 0 4px 18px #75679717;
+  box-shadow: var(--cb-shadow);
   z-index: 5;
   white-space: nowrap;
 }
 .gap-marker {
   font-size: 12px;
   color: var(--cb-soft);
-  border: 1px dashed #e5d1ba;
+  border: 1px dashed hsl(var(--warning-foreground) / 0.3);
   padding: 10px 15px;
   margin: 15px 0;
   border-radius: 7px;
@@ -450,7 +447,7 @@
 }
 .insight-tabs > button.active {
   color: var(--cb-accent);
-  border-bottom-color: #9b87d3;
+  border-bottom-color: hsl(var(--primary));
 }
 .summary-container,
 .chat-container {
@@ -592,12 +589,12 @@
 .connection-dot {
   width: 6px;
   height: 6px;
-  background: #d5a58b;
+  background: hsl(var(--warning-foreground));
   border-radius: 50%;
   flex: none;
 }
 .connection-dot.connected {
-  background: #83b59c;
+  background: hsl(var(--success-foreground));
 }
 .capture-left > div:nth-child(2) > strong {
   font-size: 12px;
@@ -642,14 +639,14 @@
 .volume-meter > div {
   width: 48px;
   height: 4px;
-  background: #dcd9e5;
+  background: hsl(var(--muted));
   border-radius: 3px;
   overflow: hidden;
 }
 .volume-meter > div > i {
   display: block;
   height: 100%;
-  background: #9a83c7;
+  background: hsl(var(--primary));
   transition: width 0.1s;
 }
 .capture-main {
@@ -726,10 +723,10 @@
   z-index: 60;
   width: 350px;
   max-width: calc(100% - 40px);
-  border: 1px solid #d0c0ea;
+  border: 1px solid var(--cb-border);
   border-radius: 10px;
   background: var(--cb-panel);
-  box-shadow: 0 10px 40px #3a2d5526;
+  box-shadow: var(--cb-shadow-overlay);
   padding: 13px 16px;
 }
 .source-popover > div {
@@ -746,13 +743,9 @@
   margin: 9px 0;
 }
 .highlight-source {
-  background: #f5f0dd;
+  background: hsl(var(--warning));
   border-radius: 8px;
-  box-shadow: 0 0 0 7px #f5f0dd;
-}
-.dark .highlight-source {
-  background: #3d3829;
-  box-shadow: 0 0 0 7px #3d3829;
+  box-shadow: 0 0 0 7px hsl(var(--warning));
 }
 .chat-panel {
   display: flex;
