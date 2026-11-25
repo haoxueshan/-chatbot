@@ -40,7 +40,52 @@ const { ASRModels, ASRSelector } = await import("../src/components/ASRModels.tsx
 const { Library } = await import("../src/components/Library.tsx");
 const { SessionView } = await import("../src/components/SessionView.tsx");
 const { default: App } = await import("../src/App.tsx");
+const { FolderNavigation, FolderManager } = await import("../src/components/SessionFolders.tsx");
 const h = React.createElement;
+
+test("folder navigation selects filters and respects disabled state", async () => {
+  const selected: string[] = [];
+  const props = {
+    folders: [{ id: "course", name: "课程", session_count: 2, created_at: "", updated_at: "" }],
+    selected: "",
+    select: (id: string) => selected.push(id),
+    manage: () => selected.push("manage"),
+  };
+  const view = await mount(h(FolderNavigation, props));
+  const select = view.container.querySelector("select")!;
+  assert.equal(select.options.length, 3);
+  await act(async () => {
+    select.value = "course";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  assert.deepEqual(selected, ["course"]);
+  await click("管理文件夹", view.container);
+  assert.deepEqual(selected, ["course", "manage"]);
+  await view.render(h(FolderNavigation, { ...props, selected: "course", disabled: true }));
+  assert.equal(select.value, "course");
+  assert.equal(select.disabled, true);
+  assert.equal(button("管理文件夹", view.container).disabled, true);
+});
+
+test("folder deletion requires confirmation and retains failure feedback", async () => {
+  const removed: string[] = [];
+  await mount(h(FolderManager, {
+    folders: [{ id: "course", name: "课程", session_count: 2, created_at: "", updated_at: "" }],
+    close: () => {},
+    save: async () => {},
+    remove: async (id: string) => { removed.push(id); throw new Error("删除失败"); },
+  }));
+  await click("删除");
+  assert.deepEqual(removed, []);
+  assert.match(document.body.textContent || "", /内容不会删除/);
+  await click("取消");
+  assert.deepEqual(removed, []);
+  await click("删除");
+  await click("确认删除文件夹");
+  assert.deepEqual(removed, ["course"]);
+  assert.match(document.body.textContent || "", /删除失败/);
+  assert.equal(button("确认删除文件夹").disabled, false);
+});
 const preferences = {
   theme: "light",
   subtitle_size: 24,

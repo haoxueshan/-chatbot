@@ -36,21 +36,22 @@ class Settings(BaseSettings):
     soniox_api_key: str = Field(default='', repr=False)
     asr_event_timeout_seconds: float | None = Field(default=None, gt=0, le=300)
     asr_finish_timeout_seconds: float | None = Field(default=None, gt=0, le=300)
-    # Opt-in experiment. False preserves the existing recognition/translation path.
-    incremental_translation_enabled: bool = False
-    preview_min_stable_seconds: float = Field(default=.35, ge=0, le=5)
-    preview_interval_seconds: float = Field(default=1.2, ge=.2, le=10)
+    # INCREMENTAL_TRANSLATION_ENABLED=false restores the legacy preview path.
+    incremental_translation_enabled: bool = True
+    preview_min_stable_seconds: float = Field(default=.25, ge=0, le=5)
+    preview_interval_seconds: float = Field(default=.5, ge=.2, le=10)
+    # Unconfirmed, continuously rewritten text needs a conservative fallback.
     preview_max_wait_seconds: float = Field(default=2.4, ge=.5, le=10)
-    preview_min_words: int = Field(default=3, ge=1, le=20)
-    preview_min_change_chars: int = Field(default=6, ge=1, le=100)
+    preview_min_words: int = Field(default=2, ge=1, le=20)
+    preview_min_change_chars: int = Field(default=4, ge=1, le=100)
     preview_max_chars: int = Field(default=2048, ge=64, le=8192)
     preview_max_sentences: int = Field(default=64, ge=1, le=256)
     preview_ttl_seconds: float = Field(default=30, ge=5, le=120)
     preview_concurrency: int = Field(default=1, ge=1, le=2)
-    preview_calls_per_minute: int = Field(default=20, ge=1, le=120)
+    preview_calls_per_minute: int = Field(default=40, ge=1, le=120)
     preview_reuse_ttl_seconds: float = Field(default=15, ge=1, le=60)
     translation_poll_seconds: float = Field(default=.1, ge=.05, le=.6)
-    translation_emit_seconds: float = Field(default=.25, ge=.1, le=1)
+    translation_emit_seconds: float = Field(default=.1, ge=.1, le=1)
     upload_max_mb: int = 40
     capture_max_seconds: int = 6300
     audio_retention_days: int = 7

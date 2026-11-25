@@ -104,7 +104,15 @@ export interface Stage {
     session_id: string;
   }[];
 }
+export interface SessionFolder {
+  id: string;
+  name: string;
+  session_count: number;
+  created_at: string;
+  updated_at: string;
+}
 export interface Session {
+  folder_id?: string | null;
   asr_profile_id?: string | null;
   asr_snapshot?: ASRSnapshot | null;
   asr_streams?: { stream_id: string; offset_ms: number; snapshot: ASRSnapshot | null }[];

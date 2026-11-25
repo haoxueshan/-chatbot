@@ -26,10 +26,12 @@ import { formatDate } from "../lib/api";
 import { Button } from "./ui/button";
 import { Dialog } from "./ui/dialog";
 import { cn } from "../lib/utils";
+import { FolderNavigation, type FolderNavigationProps } from "./SessionFolders";
 
 export interface SidebarProps {
   page: Page;
   sessions: Session[];
+  folderNavigation?: FolderNavigationProps;
   activeId?: string;
   navigate: (page: Page) => void;
   select: (session: Session) => void;
@@ -42,6 +44,7 @@ export function Sidebar({
   page,
   sessions,
   activeId,
+  folderNavigation,
   navigate,
   select,
   create,
@@ -115,6 +118,9 @@ export function Sidebar({
           </button>
         ))}
       </nav>
+      {folderNavigation && !collapsed && <FolderNavigation {...folderNavigation}
+        select={id => go(() => folderNavigation.select(id))}
+        manage={() => go(folderNavigation.manage)} />}
       <div className="sidebar-label">
         最近会话<span>{sessions.length}</span>
       </div>

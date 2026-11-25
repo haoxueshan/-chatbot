@@ -17,6 +17,7 @@ from app.services.timing import captured_duration_ms
 from app.services.retired_tasks import RETIRED_TASK_KIND
 from app.schemas.stages import stage_text
 from app.services.translation_languages import target_code, LANGUAGES
+from app.services.session_folders import FolderSelection, lock_owner, owned_folder
 
 router = APIRouter(prefix='/api/sessions', tags=['Sessions'])
 
@@ -37,7 +38,7 @@ def stage_dict(row,current_versions=None):
 
 def session_dict(db, row, detail=False):
     audio = db.query(AudioAsset).filter_by(session_id=row.id).all()
-    result = {'id':row.id,'title':row.title,'kind':row.kind,'mode':row.mode,'status':row.status,
+    result = {'id':row.id,'folder_id':row.folder_id,'title':row.title,'kind':row.kind,'mode':row.mode,'status':row.status,
       'target_language':row.target_language, 'retain_audio':row.retain_audio,'created_at':row.created_at.isoformat(),'duration_ms':row.duration_ms,
       'asr_profile_id':row.asr_profile_id,'asr_snapshot':row.asr_snapshot,
       'event_seq':row.event_seq,'active_stream_id':row.active_stream_id,'captured_ms':captured_duration_ms(db,row.id),
@@ -58,8 +59,16 @@ def session_dict(db, row, detail=False):
 
 
 @router.get('')
-def list_sessions(q: str = Query('',max_length=250), user: User = Depends(current_user), db: DBSession=Depends(get_db)):
+def list_sessions(q: str = Query('',max_length=250), user: User = Depends(current_user), db: DBSession=Depends(get_db),
+                  folder_id: str | None = Query(None, max_length=36), unfiled: bool = False):
     query = db.query(Session).filter_by(user_id=user.id)
+    if folder_id is not None and unfiled:
+        raise HTTPException(422, detail='不能同时指定文件夹和未分类')
+    if folder_id is not None:
+        owned_folder(db, user.id, folder_id)
+        query = query.filter(Session.folder_id == folder_id)
+    elif unfiled:
+        query = query.filter(Session.folder_id.is_(None))
     if q:
         ids = db.query(SegmentRevision.session_id).join(Session,Session.id==SegmentRevision.session_id).filter(Session.user_id==user.id,SegmentRevision.text.contains(q,autoescape=True))
         translated = db.query(SegmentRevision.session_id).join(Translation,Translation.segment_id==SegmentRevision.id).join(Session,Session.id==SegmentRevision.session_id).filter(Session.user_id==user.id,Translation.text.contains(q,autoescape=True))
@@ -84,6 +93,18 @@ def create_session(body: CreateSession,user: User=Depends(current_user),db:DBSes
     row.asr_snapshot=asr_snapshot
     db.add(row);db.commit()
     return session_dict(db,row)
+
+
+@router.patch('/{session_id}/folder')
+def move_session(session_id: str, body: FolderSelection, user: User = Depends(current_user),
+                 db: DBSession = Depends(get_db)):
+    lock_owner(db, user.id)
+    row = owned_session(db, session_id, user.id)
+    if body.folder_id is not None:
+        owned_folder(db, user.id, body.folder_id)
+    row.folder_id = body.folder_id
+    db.commit()
+    return session_dict(db, row)
 
 
 @router.get('/{session_id}')

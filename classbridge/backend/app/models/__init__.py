@@ -27,10 +27,22 @@ class LoginSession(Base):
     expires_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class SessionFolder(Base):
+    __tablename__ = 'session_folders'
+    id = idcol()
+    user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = Column(String(80), nullable=False)
+    name_key = Column(String(240), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=now, onupdate=now, nullable=False)
+    __table_args__ = (UniqueConstraint('user_id', 'name_key', name='uq_session_folders_owner_name'),)
+
+
 class Session(Base):
     __tablename__ = 'sessions'
     id = idcol()
     user_id = Column(String(36), ForeignKey('users.id', ondelete='CASCADE'), nullable=False, index=True)
+    folder_id = Column(String(36), ForeignKey('session_folders.id', ondelete='SET NULL', name='fk_sessions_folder_id'), nullable=True, index=True)
     title = Column(String(250), nullable=False)
     kind = Column(String(20), default='classroom', nullable=False)
     mode = Column(String(10), default='demo', nullable=False)

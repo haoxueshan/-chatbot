@@ -176,8 +176,12 @@ class IncrementalTranslator:
         quiet = stamp - (entry.changed_at if entry.changed_at is not None else entry.first_at)
         reference = entry.first_at if entry.last_request_at == float('-inf') else entry.last_request_at
         if complete_expression(entry.text):
+            # A complete-looking hypothesis is not ASR agreement. Even when
+            # stable-prefix delay is disabled, debounce speculative full text.
             ready = quiet >= max(.35, self.settings.preview_min_stable_seconds) or stamp-reference >= self.settings.preview_max_wait_seconds
-            return entry.text if ready else ''
+            if ready:
+                return entry.text
+            # A changing sentence ending must not hide its already agreed prefix.
         stable = self.prefix.view(self.stream_id, sid, stamp).stable_preview.rstrip()
         # Heuristic, not a semantic guarantee: Korean predicates/punctuation or
         # several complete words. Timer fallback does not declare source final.
@@ -227,6 +231,9 @@ class IncrementalTranslator:
             def done(task):
                 self.tasks.discard(task)
                 self.budget.release()
+                # Coalesce growth in Sentence.text, never queue one task per partial.
+                # Admission/interval/dedup checks still apply; final handoffs are skipped.
+                self.tick()
             task.add_done_callback(done)
             self.metrics['requests'] += 1
             self.sentences.move_to_end(sid)

@@ -28,9 +28,13 @@ import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Dialog } from "./ui/dialog";
+import { FolderNavigation, type FolderNavigationProps } from "./SessionFolders";
 
 export function Home({
   sessions,
+  folderNavigation,
+  moveSession,
+  moving,
   search,
   setSearch,
   create,
@@ -39,6 +43,9 @@ export function Home({
   settings,
 }: {
   sessions: Session[];
+  folderNavigation?: FolderNavigationProps;
+  moveSession?: (id: string, folderId: string) => Promise<void>;
+  moving?: boolean;
   search: string;
   setSearch: (value: string) => void;
   create: (kind?: string) => void;
@@ -141,6 +148,7 @@ export function Home({
           </Card>
         </section>
         <section className="recent-section" aria-label="历史会话">
+          {folderNavigation && <FolderNavigation {...folderNavigation} />}
           <div className="section-heading">
             <div>
               <h2>
@@ -176,9 +184,9 @@ export function Home({
                 <span>状态</span>
               </div>
               {sessions.map((session) => (
+                <div key={session.id}>
                 <button
                   className="session-row"
-                  key={session.id}
                   onClick={() => select(session)}
                 >
                   <span className="session-symbol">
@@ -222,6 +230,18 @@ export function Home({
                   </span>
                   <ChevronRight size={16} />
                 </button>
+                {folderNavigation && moveSession && <label>
+                  移动到
+                  <select aria-label={`移动会话：${session.title}`}
+                    value={session.folder_id || ""}
+                    disabled={moving || folderNavigation.disabled}
+                    onChange={e => void moveSession(session.id, e.target.value)}>
+                    <option value="">未分类</option>
+                    {folderNavigation.folders.map(folder =>
+                      <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+                  </select>
+                </label>}
+                </div>
               ))}
             </div>
           ) : (

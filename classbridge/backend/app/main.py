@@ -101,6 +101,8 @@ from app.api.asr import router as asr_router
 from app.ws.live import router as ws_router
 app.include_router(auth_router);app.include_router(sessions_router);app.include_router(settings_router);app.include_router(ws_router)
 app.include_router(asr_router)
+from app.api.session_folders import router as session_folders_router
+app.include_router(session_folders_router)
 try:
     from app.api.knowledge import router as knowledge_router
     app.include_router(knowledge_router)

@@ -7,7 +7,8 @@ import { SessionView } from "./components/SessionView";
 import { Library } from "./components/Library";
 import { Settings } from "./components/Settings";
 import { ApiError, post, request } from "./lib/api";
-import type { Mode, Page, Preferences, Session, User } from "./lib/types";
+import type { Mode, Page, Preferences, Session, SessionFolder, User } from "./lib/types";
+import { FolderManager } from "./components/SessionFolders";
 
 const defaultPreferences: Preferences = {
   asr_language_mode: "auto",
@@ -33,6 +34,16 @@ export default function App() {
     [navigationOpen, setNavigationOpen] = useState(false),
     [collapsed, setCollapsed] = useState(false),
     [online, setOnline] = useState(navigator.onLine);
+  const [folders, setFolders] = useState<SessionFolder[]>([]);
+  const [folder, setFolder] = useState("");
+  const [folderManager, setFolderManager] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const filterRef = useRef({ search, folder });
+  filterRef.current = { search, folder };
+  const listVersion = useRef(0);
+  const loadFolders = useCallback(async () => {
+    setFolders(await request<SessionFolder[]>("/session-folders"));
+  }, []);
   const current = useRef<Session | null>(session);
   current.current = session;
   const activeRef = useRef(active);
@@ -42,14 +53,19 @@ export default function App() {
   const navigationVersion = useRef(0);
   const notify = useCallback((message: string) => setToast(message), []);
   const loadSessions = useCallback(
-    async (q = "") => {
+    async (q = filterRef.current.search) => {
+      const version = ++listVersion.current;
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      const selected = filterRef.current.folder;
+      if (selected === "unfiled") params.set("unfiled", "true");
+      else if (selected) params.set("folder_id", selected);
       try {
-        setSessions(
-          await request<Session[]>(
-            `/sessions${q ? `?q=${encodeURIComponent(q)}` : ""}`,
-          ),
-        );
+        const query = params.toString();
+        const rows = await request<Session[]>(`/sessions${query ? `?${query}` : ""}`);
+        if (version === listVersion.current) setSessions(rows);
       } catch (e) {
+        if (version !== listVersion.current) return;
         if (e instanceof ApiError && e.status === 401) setUser(null);
         else notify(e instanceof Error ? e.message : "无法读取会话");
       }
@@ -112,6 +128,7 @@ export default function App() {
       return;
     }
     void loadSessions();
+    void loadFolders().catch(e => notify(e.message));
     void request<Preferences>("/settings")
       .then((p) =>
         setPreferences({ ...defaultPreferences, ...p, terms: p.terms || [] }),
@@ -124,13 +141,13 @@ export default function App() {
       else if (["home", "settings", "library"].includes(route))
         setPage(route as Page);
     }
-  }, [user, loadSessions, notify, openSession]);
+  }, [user, loadSessions, loadFolders, notify, openSession]);
   useEffect(() => {
     if (user) {
       const timer = setTimeout(() => void loadSessions(search), 240);
       return () => clearTimeout(timer);
     }
-  }, [search, user, loadSessions]);
+  }, [search, folder, user, loadSessions]);
   useEffect(() => {
     document.documentElement.dataset.theme = preferences.theme;
     document.documentElement.classList.toggle(
@@ -195,7 +212,12 @@ export default function App() {
     try {
       await post("/auth/logout");
       navigationVersion.current++;
+      listVersion.current++;
       setUser(null);
+      setFolders([]);
+      setFolder("");
+      setSearch("");
+      setFolderManager(false);
       setSession(null);
       setSessions([]);
       setPage("home");
@@ -203,6 +225,28 @@ export default function App() {
     } catch (e) {
       notify(e instanceof Error ? e.message : "退出失败");
     }
+  };
+  const folderNavigation = {
+    folders, selected: folder, disabled: active,
+    select: (id: string) => {
+      if (activeRef.current) return;
+      listVersion.current++;
+      filterRef.current.folder = id;
+      setFolder(id);
+      navigate("home");
+    },
+    manage: () => { if (!activeRef.current) setFolderManager(true); },
+  };
+  const moveSession = async (id: string, folderId: string) => {
+    if (moving || activeRef.current) return;
+    setMoving(true);
+    try {
+      await request(`/sessions/${id}/folder`, {
+        method: "PATCH", body: JSON.stringify({ folder_id: folderId || null }),
+      });
+      await Promise.all([loadSessions(), loadFolders()]);
+    } catch (e) { notify(e instanceof Error ? e.message : "移动失败"); }
+    finally { setMoving(false); }
   };
   if (authLoading)
     return (
@@ -226,6 +270,7 @@ export default function App() {
         collapsed={collapsed}
         page={page}
         sessions={sessions}
+        folderNavigation={folderNavigation}
         activeId={session?.id}
         navigate={navigate}
         select={(s) => void openSession(s.id)}
@@ -280,6 +325,9 @@ export default function App() {
           {page === "home" && (
             <Home
               sessions={sessions}
+              folderNavigation={folderNavigation}
+              moveSession={moveSession}
+              moving={moving}
               search={search}
               setSearch={setSearch}
               create={(kind) => setNewKind(kind || "classroom")}
@@ -310,6 +358,24 @@ export default function App() {
           )}
         </main>
       </div>
+      {folderManager && <FolderManager
+        folders={folders}
+        close={() => setFolderManager(false)}
+        save={async (id, name) => {
+          await request(`/session-folders${id ? `/${id}` : ""}`, {
+            method: id ? "PATCH" : "POST", body: JSON.stringify({ name }),
+          });
+          await loadFolders();
+        }}
+        remove={async id => {
+          await request(`/session-folders/${id}`, { method: "DELETE" });
+          if (filterRef.current.folder === id) {
+            filterRef.current.folder = "";
+            setFolder("");
+          }
+          await Promise.all([loadFolders(), loadSessions()]);
+        }}
+      />}
       {newKind && (
         <NewSession
           kind={newKind}
