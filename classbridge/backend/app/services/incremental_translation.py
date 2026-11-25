@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import time
+import weakref
 from datetime import datetime, timedelta, timezone
 
 from app.services.stable_prefix import StablePrefixProcessor, complete_words, complete_expression, preview_input_key, preview_compatible
@@ -62,12 +63,31 @@ class PreviewBudget:
     def __init__(self):
         self.active = 0
         self.calls = deque()
+        # Weak owners cannot retain disconnected captures. Only admission intent
+        # is queued, never text, tasks or paid requests.
+        self.waiters = weakref.WeakKeyDictionary()
 
-    def acquire(self, stamp, concurrency, per_minute):
+    def withdraw(self, owner):
+        self.waiters.pop(owner, None)
+
+    def acquire(self, stamp, concurrency, per_minute, *, owner=None):
         while self.calls and stamp - self.calls[0] >= 60:
             self.calls.popleft()
+        for waiting, seen in list(self.waiters.items()):
+            if stamp - seen >= 5:
+                self.withdraw(waiting)
+        if owner is not None:
+            if owner not in self.waiters and len(self.waiters) >= 1024:
+                return False
+            self.waiters[owner] = stamp
+            if next(iter(self.waiters)) is not owner:
+                return False
+        elif self.waiters:
+            return False
         if self.active >= concurrency or len(self.calls) >= per_minute:
             return False
+        if owner is not None:
+            self.withdraw(owner)
         self.active += 1
         self.calls.append(stamp)
         return True
@@ -199,6 +219,7 @@ class IncrementalTranslator:
             return
         stamp = self.clock()
         self.expire(stamp)
+        eligible = False
         # Round-robin admission: a long sentence must not starve another sentence.
         for sid, entry in list(self.sentences.items()):
             if entry.final_revision is not None:continue
@@ -216,7 +237,8 @@ class IncrementalTranslator:
             # cancel in update(); the admission slot lasts until the task is done.
             if entry.task and not entry.task.done():
                 continue
-            if not self.budget.acquire(stamp, self.settings.preview_concurrency, self.settings.preview_calls_per_minute):
+            eligible = True
+            if not self.budget.acquire(stamp, self.settings.preview_concurrency, self.settings.preview_calls_per_minute, owner=self):
                 self.metrics['suppressed'] += 1
                 continue
             entry.request_id += 1
@@ -237,6 +259,8 @@ class IncrementalTranslator:
             task.add_done_callback(done)
             self.metrics['requests'] += 1
             self.sentences.move_to_end(sid)
+        if not eligible:
+            self.budget.withdraw(self)
 
     async def _translate(self, sid, entry, request_id, text):
         timing = TranslationTiming(self.clock)
@@ -286,6 +310,7 @@ class IncrementalTranslator:
 
     async def close(self):
         self.closed = True
+        self.budget.withdraw(self)
         for sid in list(self.sentences): self.discard(sid)
         for task in self.tasks: task.cancel()
         if self.tasks: await asyncio.gather(*list(self.tasks), return_exceptions=True)

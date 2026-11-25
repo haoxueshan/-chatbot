@@ -10,6 +10,7 @@ class CreateSession(BaseModel):
     retain_audio: bool = False
     target_language: SupportedTargetLanguage = 'zh-CN'
     asr_profile_id: str | None = Field(default=None,max_length=36)
+    folder_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 class ExportRequest(BaseModel):

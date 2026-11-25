@@ -34,6 +34,22 @@ class Preferences(BaseModel):
         return terms
 
 
+def translation_runtime_status():
+    # Explicit allowlist: never serialize Settings wholesale (it contains secrets).
+    fields = (
+        'incremental_translation_enabled', 'preview_min_stable_seconds',
+        'preview_interval_seconds', 'preview_max_wait_seconds', 'preview_min_words',
+        'preview_min_change_chars', 'preview_concurrency', 'preview_calls_per_minute',
+        'translation_poll_seconds', 'translation_emit_seconds',
+    )
+    return {
+        **{name: getattr(settings, name) for name in fields},
+        'model': settings.translation_model,
+        'mode': 'incremental' if settings.incremental_translation_enabled else 'legacy',
+        'budget_scope': 'process',
+    }
+
+
 @router.get('')
 def read_settings(user: User = Depends(current_user), db: DBSession = Depends(get_db)):
     # Ignore retired/unknown JSON fields without validating old unrelated data.
@@ -51,6 +67,7 @@ def read_settings(user: User = Depends(current_user), db: DBSession = Depends(ge
     try:AliyunProvider().ensure_configured(protocols=('openai','native'))
     except ProviderError as exc:aliyun_error={'code':exc.code,'message':exc.message}
     return {**preferences, 'asr_terms_status':{'enabled_count':len(report['vocabulary']),'skipped':report['skipped']},
+      'translation_runtime': translation_runtime_status(),
       'real_ready': config_error is None, 'configuration_error':config_error,
       'default_asr_profile_id':profile.id if profile else None,'aliyun_services_error':aliyun_error,
       'model_status': config_error['code'] if config_error else 'configured_unverified',

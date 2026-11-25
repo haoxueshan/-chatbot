@@ -83,6 +83,10 @@ def create_session(body: CreateSession,user: User=Depends(current_user),db:DBSes
     except ValueError as exc:raise HTTPException(422,detail=str(exc))
     if body.mode=='demo' and language!='zh-CN':
         raise HTTPException(422,detail={'code':'demo_language_unsupported','message':'模拟演示仅支持简体中文；其他目标语言请选择真实模式。'})
+    if body.folder_id is not None:
+        # Serialize with folder deletion and validate ownership before insertion.
+        lock_owner(db, user.id)
+        owned_folder(db, user.id, body.folder_id)
     asr_snapshot=None
     if body.mode=='real':
         from app.services.asr_profiles import select

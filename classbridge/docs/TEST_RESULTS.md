@@ -1,5 +1,16 @@
 # 实际测试与验收记录
 
+## 2026-11-25：翻译调度与会话文件夹回归
+
+- 后端 `python -m pytest -q`：**428 passed，1 skipped**，80.15 秒。
+- 前端 `npm test`：**110 passed，0 failed**；`npm run build`（TypeScript + Vite）成功，构建耗时 3.97 秒。三项命令退出码均为 0。
+- `tests/benchmark_translation.py` 固定 Mock 回放：20 次 ASR 回调、1 次有效原文变化，历史基线翻译请求 20 次、冗余 19 次、取消 19 次；当前请求 1 次、冗余和取消均为 0。
+- `tests/benchmark_translation_scheduler.py`：空闲 worker 扫描后 25 ms 到达任务，六次 Mock 样本。历史基线排队 P50/P95 为 **583.466/585.410 ms**，轮询兜底为 **77.306/81.048 ms**，提交唤醒为 **0.254/1.048 ms**。P50 为中位数，P95 为 nearest-rank（六次样本中取最大值）。两项基准退出码均为 0。
+- 上述基准不调用付费模型，只衡量固定回放及任务准入，不代表云翻译耗时、识别准确率或课堂端到端延迟。
+- 本轮未完成浏览器视觉、实体 Safari、真实课堂长录音、生产 PostgreSQL/容器迁移恢复验收。功能与部署边界见 [FEATURE_STATUS.md](FEATURE_STATUS.md) 和 [DEPLOYMENT.md](DEPLOYMENT.md)。
+
+以下为历史测试记录。
+
 2026-11-03 多语言字幕：基线 `8ab0c04`。后端完整回归在增量开关 false / true 下分别 **214 passed, 1 skipped**（29.80 / 30.72秒）；跳过的是未配置独立服务的 PostgreSQL 集成迁移测试。前端 **71 passed**，typecheck/build、pip check 通过。14组 Qwen MT HTTP/SSE Mock、会话语言锁定、跨语言缓存/事件/术语隔离、SQLite 历史迁移回退与版本保留、PDF 渲染均已验证。本次真实API调用0，未改真实业务数据；Docker/实际PG/实体Safari/多语课堂效果未验证。详见 [多语言交付记录](MULTILINGUAL_TRANSLATION.md)。
 
 2026-11-03 原文/翻译双流水线隔离：后端完整回归在 `INCREMENTAL_TRANSLATION_ENABLED=false`、`true` 下各 **167 passed，0 failed**（21.46/20.53 秒）；三个受影响模块联合定向 **29 passed**。前端 **64 passed，0 failed**，TypeScript/Vite 生产构建通过（2120 模块，3.45 秒）。新增后端 19 个参数展开用例、前端 13 个 reducer 用例及 1 个实际组件渲染用例。验证慢 MT 不阻塞 ASR、正式保存失败不误标成功、中断原文独立持久化与 API/WS 恢复、RAG/摘要/导出排除未确认内容、原译文独立状态、旧版本及清空水位。测试使用临时 SQLite 与 Mock ASR/MT，新增付费调用 0；未重启用户服务或改真实配置，没有真实课堂/实体 Safari 结论。逐文件说明及限制见 [双流水线验收报告](ASR_DUAL_PIPELINE.md)。

@@ -1,5 +1,6 @@
 """Owner-scoped folder operations; deletion only removes classification."""
 import unicodedata
+from typing import Annotated
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import update
@@ -25,6 +26,18 @@ class FolderInput(BaseModel):
 class FolderSelection(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     folder_id: str | None = Field(max_length=36)
+
+
+class BatchFolderSelection(FolderSelection):
+    session_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = Field(
+        min_length=1, max_length=100)
+
+    @field_validator('session_ids')
+    @classmethod
+    def unique_ids(cls, value):
+        if len(set(value)) != len(value):
+            raise ValueError('会话 ID 不得重复')
+        return value
 
 
 def lock_owner(db, user_id):

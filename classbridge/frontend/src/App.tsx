@@ -41,8 +41,15 @@ export default function App() {
   const filterRef = useRef({ search, folder });
   filterRef.current = { search, folder };
   const listVersion = useRef(0);
+  const folderVersion = useRef(0);
   const loadFolders = useCallback(async () => {
-    setFolders(await request<SessionFolder[]>("/session-folders"));
+    const version = ++folderVersion.current;
+    try {
+      const rows = await request<SessionFolder[]>("/session-folders");
+      if (version === folderVersion.current) setFolders(rows);
+    } catch (error) {
+      if (version === folderVersion.current) throw error;
+    }
   }, []);
   const current = useRef<Session | null>(session);
   current.current = session;
@@ -201,10 +208,15 @@ export default function App() {
   }) => {
     const result = await post<Session>("/sessions", {
       ...data,
+      folder_id: filterRef.current.folder && filterRef.current.folder !== "unfiled"
+        ? filterRef.current.folder : null,
       retain_audio: data.mode === "demo" ? false : data.retain_audio,
     });
     setNewKind(null);
-    await loadSessions();
+    await Promise.all([
+      loadSessions(),
+      loadFolders().catch(e => notify(e instanceof Error ? e.message : "无法刷新文件夹")),
+    ]);
     await openSession(result.id);
   };
   const logout = async () => {
@@ -213,6 +225,7 @@ export default function App() {
       await post("/auth/logout");
       navigationVersion.current++;
       listVersion.current++;
+      folderVersion.current++;
       setUser(null);
       setFolders([]);
       setFolder("");
@@ -236,6 +249,20 @@ export default function App() {
       navigate("home");
     },
     manage: () => { if (!activeRef.current) setFolderManager(true); },
+  };
+  const moveSessions = async (ids: string[], folderId: string): Promise<boolean> => {
+    if (moving || activeRef.current || !ids.length) return false;
+    setMoving(true);
+    try {
+      await post("/session-folders/move-sessions", {
+        session_ids: ids, folder_id: folderId || null,
+      });
+      await Promise.all([loadSessions(), loadFolders()]);
+      return true;
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "批量移动失败");
+      return false;
+    } finally { setMoving(false); }
   };
   const moveSession = async (id: string, folderId: string) => {
     if (moving || activeRef.current) return;
@@ -327,9 +354,14 @@ export default function App() {
               sessions={sessions}
               folderNavigation={folderNavigation}
               moveSession={moveSession}
+              moveSessions={moveSessions}
               moving={moving}
               search={search}
-              setSearch={setSearch}
+              setSearch={value => {
+                listVersion.current++;
+                filterRef.current.search = value;
+                setSearch(value);
+              }}
               create={(kind) => setNewKind(kind || "classroom")}
               select={(s) => void openSession(s.id)}
               library={() => navigate("library")}
@@ -349,6 +381,7 @@ export default function App() {
               deleted={() => {
                 setSession(null);
                 navigate("home");
+                void loadFolders().catch(e => notify(e instanceof Error ? e.message : "无法刷新文件夹"));
               }}
             />
           )}

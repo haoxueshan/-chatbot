@@ -34,6 +34,7 @@ export function Home({
   sessions,
   folderNavigation,
   moveSession,
+  moveSessions,
   moving,
   search,
   setSearch,
@@ -45,6 +46,7 @@ export function Home({
   sessions: Session[];
   folderNavigation?: FolderNavigationProps;
   moveSession?: (id: string, folderId: string) => Promise<void>;
+  moveSessions?: (ids: string[], folderId: string) => Promise<boolean>;
   moving?: boolean;
   search: string;
   setSearch: (value: string) => void;
@@ -53,6 +55,11 @@ export function Home({
   library: () => void;
   settings: () => void;
 }) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [destination, setDestination] = useState("");
+  useEffect(() => { setSelectedIds([]); }, [search, folderNavigation?.selected]);
+  const visibleIds = selectedIds.filter(id => sessions.some(session => session.id === id));
+  const batchDisabled = moving || folderNavigation?.disabled;
   const total = sessions.reduce(
     (value, session) =>
       value + (session.captured_ms ?? session.duration_ms ?? 0),
@@ -176,6 +183,26 @@ export function Home({
               )}
             </label>
           </div>
+          {folderNavigation && moveSessions && sessions.length > 0 && (
+            <div className="folder-batch-actions" role="group" aria-label="批量移动会话">
+              <label>
+                <input type="checkbox" aria-label="选择前100个会话"
+                  disabled={batchDisabled}
+                  checked={visibleIds.length > 0 && sessions.slice(0, 100).every(s => visibleIds.includes(s.id))}
+                  onChange={e => setSelectedIds(e.target.checked ? sessions.slice(0, 100).map(s => s.id) : [])} />
+                选择当前列表（最多100个）
+              </label>
+              <span role="status">已选 {visibleIds.length} 个</span>
+              <select aria-label="批量移动目标文件夹" value={destination} disabled={batchDisabled}
+                onChange={e => setDestination(e.target.value)}>
+                <option value="">未分类</option>
+                {folderNavigation.folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+              </select>
+              <Button disabled={batchDisabled || !visibleIds.length} onClick={async () => {
+                if (await moveSessions(visibleIds, destination)) setSelectedIds([]);
+              }}>移动所选会话</Button>
+            </div>
+          )}
           {sessions.length ? (
             <div className="session-list">
               <div className="session-columns" aria-hidden="true">
@@ -185,6 +212,14 @@ export function Home({
               </div>
               {sessions.map((session) => (
                 <div key={session.id}>
+                {moveSessions && <label>
+                  <input type="checkbox" aria-label={`选择会话：${session.title}`}
+                    checked={visibleIds.includes(session.id)}
+                    disabled={batchDisabled || (!visibleIds.includes(session.id) && visibleIds.length >= 100)}
+                    onChange={e => setSelectedIds(e.target.checked
+                      ? [...visibleIds, session.id] : visibleIds.filter(id => id !== session.id))} />
+                  选择
+                </label>}
                 <button
                   className="session-row"
                   onClick={() => select(session)}
@@ -247,10 +282,10 @@ export function Home({
           ) : (
             <Card className="empty-state">
               <FileText size={28} />
-              <h3>{search ? "未找到相关会话" : "还没有会话"}</h3>
+              <h3>{search ? "未找到相关会话" : folderNavigation?.selected ? "当前分类暂无会话" : "还没有会话"}</h3>
               <p>
                 {search
-                  ? "试试其他标题或字幕关键词。"
+                  ? "当前分类中没有匹配结果，可清除搜索或切换到全部会话。"
                   : "从模拟演示开始体验，不调用付费 API。"}
               </p>
               {!search && (

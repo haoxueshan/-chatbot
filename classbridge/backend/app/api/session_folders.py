@@ -6,7 +6,7 @@ from app.api.auth import current_user
 from app.db import get_db
 from app.models import User, Session, SessionFolder
 from app.services.session_folders import (
-    FolderInput, MAX_FOLDERS, lock_owner, owned_folder,
+    FolderInput, BatchFolderSelection, MAX_FOLDERS, lock_owner, owned_folder,
     public_folder, set_name, commit_folder,
 )
 
@@ -32,6 +32,24 @@ def create_folder(body: FolderInput, user: User = Depends(current_user), db: DBS
     db.add(row)
     commit_folder(db)
     return public_folder(row)
+
+
+@router.post('/move-sessions')
+def move_sessions(body: BatchFolderSelection, user: User = Depends(current_user),
+                  db: DBSession = Depends(get_db)):
+    lock_owner(db, user.id)
+    if body.folder_id is not None:
+        owned_folder(db, user.id, body.folder_id)
+    rows = db.query(Session).filter(
+        Session.user_id == user.id, Session.id.in_(body.session_ids)).all()
+    if len(rows) != len(body.session_ids):
+        raise HTTPException(404, detail={'code': 'session_not_found', 'message': '会话不存在'})
+    # Validate the entire batch before changing anything. Classification alone
+    # must never alter source revisions, translations, tasks or audio retention.
+    for row in rows:
+        row.folder_id = body.folder_id
+    commit_folder(db)
+    return {'ok': True, 'moved': len(rows)}
 
 
 @router.patch('/{folder_id}')

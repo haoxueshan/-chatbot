@@ -558,6 +558,48 @@ test("dashboard opens correct session and creates each original kind with actual
   assert.ok(!view.container.textContent!.includes("准确率"));
 });
 
+test("batch selection retains failed moves, clears successful moves and resets on filter changes", async () => {
+  const calls: unknown[] = [];
+  let succeeds = false;
+  const props = {
+    sessions: [lesson, other], search: "", setSearch() {}, create() {},
+    select() {}, library() {}, settings() {},
+    folderNavigation: {
+      folders: [{ id: "course", name: "课程", session_count: 0, created_at: "", updated_at: "" }],
+      selected: "", select() {}, manage() {},
+    },
+    moveSessions: async (ids: string[], folder: string) => {
+      calls.push({ ids, folder });
+      return succeeds;
+    },
+  };
+  const view = await mount(h(Home, props));
+  const check = () => view.container.querySelector<HTMLInputElement>('[aria-label="选择前100个会话"]')!;
+  await act(async () => check().click());
+  const target = view.container.querySelector<HTMLSelectElement>('[aria-label="批量移动目标文件夹"]')!;
+  await act(async () => {
+    target.value = "course";
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await click("移动所选会话");
+  assert.deepEqual(calls, [{ ids: ["lesson", "other"], folder: "course" }]);
+  assert.equal(check().checked, true);
+  await view.render(h(Home, { ...props, moving: true }));
+  assert.equal(check().disabled, true);
+  assert.equal(button("移动所选会话").disabled, true);
+  await view.render(h(Home, props));
+  succeeds = true;
+  await click("移动所选会话");
+  assert.equal(check().checked, false);
+  assert.equal(button("移动所选会话").disabled, true);
+  await act(async () => check().click());
+  await view.render(h(Home, { ...props, search: "新搜索" }));
+  assert.equal(check().checked, false);
+  await act(async () => check().click());
+  await view.render(h(Home, { ...props, folderNavigation: { ...props.folderNavigation, selected: "course" } }));
+  assert.equal(check().checked, false);
+});
+
 test("new-session dialog blocks dismissal while submitting and preserves create payload", async () => {
   let closed = 0,
     resolve: (value?: unknown) => void = () => {},
