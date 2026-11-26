@@ -5,7 +5,7 @@ import logging
 import hashlib
 from datetime import datetime, timedelta, timezone
 from celery import Celery
-from sqlalchemy import select, case, and_, or_, update
+from sqlalchemy import select, case, and_, or_, update, func
 from app.config import settings
 from app.db import SessionLocal
 from app.models import ProcessingTask, Outbox, Session, SegmentRevision, Translation, AudioAsset, RecognitionStream, User, now
@@ -214,7 +214,10 @@ async def execute_task(task_id):
             claimed=db.execute(update(ProcessingTask).where(ProcessingTask.id==task_id,
                 ProcessingTask.status.in_(['pending','retry'])).values(status='running',attempts=ProcessingTask.attempts+1,updated_at=now()))
             if claimed.rowcount!=1:db.rollback();return
-        else:task.status='running';task.attempts+=1;task.updated_at=now()
+        else:
+            claimed=db.execute(update(ProcessingTask).where(ProcessingTask.id==task_id,
+                ProcessingTask.status.in_(['pending','retry'])).values(status='running',attempts=ProcessingTask.attempts+1,updated_at=now()))
+            if claimed.rowcount!=1:db.rollback();return
         db.commit();db.refresh(task)
         try:
             if task.kind=='translate': result=await translate(db,task)
@@ -275,6 +278,15 @@ def pending_task_ids(db):
     if cancel_retired_tasks(db):db.commit()
     current=now()
     query=db.query(ProcessingTask).filter(ProcessingTask.status.in_(['pending','retry']))
+    # Defer, never delete, optional work while a recording has substantial backlog.
+    busy=select(ProcessingTask.session_id).join(Session,Session.id==ProcessingTask.session_id).where(
+        Session.status.in_(['preparing','recording','processing']),
+        ProcessingTask.status.in_(['pending','retry','running'])).group_by(ProcessingTask.session_id).having(
+        func.count(ProcessingTask.id)>=settings.processing_backlog_degraded)
+    query=query.filter(or_(ProcessingTask.kind.notin_(['summarize','index_segment']),
+        ProcessingTask.session_id.is_(None),ProcessingTask.session_id.notin_(busy)))
+    query=query.order_by(case((ProcessingTask.kind=='translate',0),
+        (ProcessingTask.kind.in_(['export','reprocess','parse_document']),1),else_=2))
     if settings.incremental_translation_enabled:
         # Filter retry backoff BEFORE limit, so sleeping retries cannot hide a
         # fresh final translation behind the first 50 rows.
@@ -353,3 +365,30 @@ async def local_worker_loop():
         for _,task in active.values():task.cancel()
         for _,task in active.values():
             with contextlib.suppress(asyncio.CancelledError):await task
+
+
+async def isolated_local_worker_loop():
+    """One owned thread/loop; DB Sessions and transactions never cross threads.
+
+    Local concurrency and Outbox behavior remain unchanged. Cancellation reaches
+    the owned loop, and joins it before API shutdown can release resources.
+    """
+    import threading
+    stop=threading.Event();owned={}
+    async def entry():
+        owned.update(loop=asyncio.get_running_loop(),task=asyncio.current_task())
+        if stop.is_set():return
+        try:await local_worker_loop()
+        except asyncio.CancelledError:
+            if not stop.is_set():raise
+    runner=asyncio.create_task(asyncio.to_thread(lambda:asyncio.run(entry())))
+    try:await asyncio.shield(runner)
+    except asyncio.CancelledError:
+        stop.set()
+        loop=owned.get('loop');task=owned.get('task')
+        if loop and not loop.is_closed():
+            try:loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                if not loop.is_closed():raise
+        await runner
+        raise

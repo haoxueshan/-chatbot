@@ -15,6 +15,31 @@ PCM_FRAME_BYTES = 640
 PCM_QUEUE_BYTES = 2000 * PCM_BYTES_PER_MS
 
 
+class ASRResultQueue(asyncio.Queue):
+    """Measure existing bounded FIFO; no token/final dropping or reordering."""
+    def __init__(self,metrics):
+        super().__init__(maxsize=64);self.metrics=metrics
+        metrics.update(asr_result_queue_size=0,asr_result_queue_peak=0,asr_partial_coalesced=0)
+    async def put(self,value):
+        key='asr_final_received' if value.get('final') else 'asr_partial_received'
+        self.metrics[key]=self.metrics.get(key,0)+1
+        await super().put(value)
+        self.metrics['asr_result_queue_size']=self.qsize()
+        self.metrics['asr_result_queue_peak']=max(self.metrics['asr_result_queue_peak'],self.qsize())
+    def get_nowait(self):
+        value=super().get_nowait()
+        self.metrics['asr_result_queue_size']=self.qsize()
+        return value
+
+
+def safe_provider_code(value):
+    # Codes only, never arbitrary upstream strings or error messages.
+    allowed={'InvalidApiKey','AccessDenied','InvalidParameter','InvalidTask','InvalidWorkspace',
+             'ModelNotFound','Throttling','Throttling.RateQuota','InvalidParameter.Model',
+             'QuotaExceeded','InternalError','ServiceUnavailable','InternalServerError'}
+    return value if isinstance(value,str) and value in allowed else 'unknown_provider_code'
+
+
 async def blocking_call(function, *args):
     """Join an in-flight blocking operation before cleanup closes its resources.
 

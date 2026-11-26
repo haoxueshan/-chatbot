@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { formatDate, formatTime, post, request } from "../lib/api";
 import { useLive } from "../lib/useLive";
-import { buildTimeline } from "../lib/timeline";
+import { buildTimeline, incidentLabel } from "../lib/timeline";
 import { recognitionStatus } from "../lib/captureHealth";
 import type { Citation, Preferences, Session, Stage } from "../lib/types";
 import { Chat } from "./Chat";
@@ -213,7 +213,7 @@ export function SessionView({
   const live = useLive(session, refresh, {
     deviceId: microphoneId,
     processingMode: preferences.audio_processing_mode || "standard",
-  });
+  }, preferences.audio_runtime);
   const refreshMicrophones = () => {
     const generation=++deviceGeneration.current;
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) {
@@ -768,14 +768,27 @@ export function SessionView({
           正在准备识别服务，请稍候再说话；准备完成后开始采音计时。
         </div>
       )}
-      {live.active && !live.preparing && live.health && (
+      {!live.preparing && live.health && (
         <details className="info-box capture-health">
-          <summary role="status">{recognitionStatus(live.health)}</summary>
+          <summary role="status">{!live.active ? `录音已停止${live.health.first_failure_code ? ` · ${live.health.first_failure_code}` : ""}` : live.browserBufferWarning ? "正在录音 · 浏览器音频发送稍有延迟" : recognitionStatus(live.health)}</summary>
           <p className="tiny muted">
             服务器已收到 {(live.health.received_audio_ms / 1000).toFixed(1)} 秒音频 ·
             已向识别服务发送 {(live.health.sent_audio_ms / 1000).toFixed(1)} 秒 ·
             待转发 {live.health.queued_audio_ms} 毫秒 ·
             输入电平 {live.health.input_dbfs} dBFS
+          </p>
+          <p className="tiny muted">
+            {live.effectiveASR?.provider} / {live.effectiveASR?.model} ·
+            采集 {live.health.capture_state || "CAPTURING"} · 识别 {live.health.asr_state || "STREAMING"} ·
+            浏览器缓冲估算 {Math.round(live.browserBufferMs)} 毫秒 ·
+            聚合 {(live.health.batch_pending_pcm_bytes || 0)/32} 毫秒 ·
+            在途 {(live.health.upstream_inflight_pcm_bytes || 0)/32} 毫秒 ·
+            当前发送等待 {live.health.current_send_wait_ms || 0} 毫秒 ·
+            WAV 已写入 {((live.health.archive_written_pcm_bytes || 0)/32000).toFixed(1)} 秒（收尾后确认保存） ·
+            ASR 结果队列 {live.health.asr_result_queue_size || 0} ·
+            事件循环延迟 {live.health.event_loop_lag_ms || 0} 毫秒 ·
+            后台任务 {live.health.pending_processing_tasks || 0} ·
+            自动恢复未启用
           </p>
           <p className="tiny muted">电平表示声音强弱，不能据此判断是否有人说话。已发送也不代表模型已完成识别。</p>
         </details>
@@ -870,7 +883,7 @@ export function SessionView({
             {timeline.map((item) => {
               if (item.kind === "gap") return (
                 <div className="gap-marker" key={item.key}>
-                  {formatTime(item.time)} · 采集缺口 · {item.gap.message || "此时段音频不可恢复"}
+                  {formatTime(item.time)} · {incidentLabel(item.related)} · {Array.from(new Set(item.related.map(e=>e.message).filter(Boolean))).join("；") || "此时段处理状态待确认"}
                 </div>
               );
               const s = item.segment;

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 import uuid
@@ -10,8 +11,8 @@ from urllib.parse import urlparse
 
 import httpx
 from websockets.asyncio.client import connect
-from websockets.exceptions import InvalidStatus, ConnectionClosed
-from app.providers.transport import tls_context
+from websockets.exceptions import InvalidStatus, InvalidMessage, ConnectionClosed
+from app.providers.transport import tls_context, ASRResultQueue, safe_provider_code
 
 
 class ProviderError(Exception):
@@ -230,10 +231,12 @@ class AliyunProvider:
         finish_sent = False
         finish_started = False
         finish_started_at = None
+        phase='handshake'
         event_timeout = float(self.value('asr_event_timeout_seconds',None) or self.timeout)
         finish_timeout = float(self.value('asr_finish_timeout_seconds',None) or self.timeout)
         try:
             async with connect(self.base("ws"), additional_headers=headers, open_timeout=self.timeout, close_timeout=5, max_size=2**20, max_queue=32, ping_interval=20) as ws:
+                phase='task_start'
                 await ws.send(json.dumps(message))
                 first = json.loads(await asyncio.wait_for(ws.recv(), self.timeout))
                 if first.get("header", {}).get("event") != "task-started":
@@ -243,30 +246,50 @@ class AliyunProvider:
                 metrics['last_event_monotonic']=time.monotonic()
                 if on_ready:
                     await on_ready()
+                phase='streaming'
                 finishing=asyncio.get_running_loop().create_future()
 
                 async def send_audio():
-                    nonlocal finish_sent, finish_started, finish_started_at
-                    async for frame in audio:
-                        if not frame or len(frame) % 2 or len(frame) > 32000:
-                            raise ProviderError("format_error", "PCM 帧须为单声道 16 kHz int16，且不超过一秒。")
-                        stamp=time.monotonic()
-                        try:
-                            await asyncio.wait_for(ws.send(frame),float(self.value('asr_send_timeout_seconds',5)))
-                        except TimeoutError as exc:
-                            raise ProviderError('upstream_send_timeout','向阿里云发送音频超时，采集已停止；请检查服务器网络后重试。') from exc
-                        metrics['send_wait_ms']=int((time.monotonic()-stamp)*1000)
-                        metrics['last_send_monotonic']=time.monotonic()
-                        metrics['sent_audio_ms']+=len(frame)/32
-                        # Buffered browser packets must not starve response handling.
-                        await asyncio.sleep(0)
+                    nonlocal finish_sent, finish_started, finish_started_at, phase
+                    from app.providers.asr.pcm_batcher import pcm_batch_stream
+                    enabled=self.value('aliyun_asr_batch_enabled',False)
+                    batches=pcm_batch_stream(audio,int(self.value('aliyun_asr_batch_ms',100)),
+                        int(self.value('aliyun_asr_batch_max_wait_ms',100)),metrics) if enabled else audio
+                    try:
+                        async with contextlib.aclosing(batches):
+                            async for frame in batches:
+                                if not frame or len(frame) % 2 or len(frame) > 32000:
+                                    raise ProviderError("format_error", "PCM 帧须为单声道 16 kHz int16，且不超过一秒。")
+                                stamp=time.monotonic()
+                                metrics.update(upstream_inflight_pcm_bytes=len(frame),send_started_monotonic=stamp)
+                                try:
+                                    await asyncio.wait_for(ws.send(frame),float(self.value('asr_send_timeout_seconds',5)))
+                                except BaseException as exc:
+                                    metrics['uncertain_delivery_pcm_bytes']=metrics.get('uncertain_delivery_pcm_bytes',0)+len(frame)
+                                    if isinstance(exc,TimeoutError):
+                                        raise ProviderError('upstream_send_timeout','向阿里云发送音频超时，采集已停止。',
+                                            diagnostics={'timeout_phase':'audio_send'}) from exc
+                                    raise
+                                else:
+                                    metrics['sent_audio_ms']+=len(frame)/32
+                                    metrics['upstream_sent_pcm_bytes']=metrics.get('upstream_sent_pcm_bytes',0)+len(frame)
+                                    metrics['upstream_audio_messages']=metrics.get('upstream_audio_messages',0)+1
+                                    metrics['last_send_monotonic']=time.monotonic()
+                                finally:
+                                    metrics['send_wait_ms']=int((time.monotonic()-stamp)*1000)
+                                    metrics['upstream_inflight_pcm_bytes']=0
+                                    metrics.pop('send_started_monotonic',None)
+                                await asyncio.sleep(0)
+                    except ValueError as exc:
+                        raise ProviderError('format_error','PCM 音频帧格式无效。') from exc
                     finish_started=True
+                    phase='finish'
                     finish_started_at=time.monotonic()
                     finishing.set_result(None) # Recompute deadline even if finish-task send stalls.
                     await asyncio.wait_for(ws.send(json.dumps({"header": {"action": "finish-task", "task_id": task_id, "streaming": "duplex"}, "payload": {"input": {}}})),self.timeout)
                     finish_sent=True
 
-                results=asyncio.Queue(maxsize=64)
+                results=ASRResultQueue(metrics)
                 # 64 bounded ASR messages; consumer DB/UI latency no longer
                 # prevents reading the next upstream message in the usual case.
                 async def receive_results():
@@ -278,7 +301,8 @@ class AliyunProvider:
                         if left<=0:
                             code='asr_finish_timeout' if finish_started_at is not None else 'asr_event_timeout'
                             raise ProviderError(code,'识别服务收尾超时，已保存原文保留。' if finish_started_at is not None
-                                                else '识别服务未在时限内返回当前任务事件或心跳，已停止采集。')
+                                                else '识别服务未在时限内返回当前任务事件或心跳，已停止采集。',
+                                                diagnostics={'timeout_phase':'finish' if finish_started_at is not None else 'task_events'})
                         return left
                     while True:
                         remaining()
@@ -299,7 +323,9 @@ class AliyunProvider:
                         metrics['last_event_monotonic']=time.monotonic()
                         event = header.get("event")
                         if event == "task-failed":
-                            raise classify_error(0, header.get("error_code", ""))
+                            error=classify_error(0, header.get("error_code", ""))
+                            error.diagnostics['provider_error_code']=safe_provider_code(header.get('error_code'))
+                            raise error
                         if event == "task-finished":
                             if finish_started:
                                 try:await asyncio.wait_for(asyncio.shield(sender),remaining())
@@ -340,6 +366,13 @@ class AliyunProvider:
                     tasks=[task for task in (sender,reader,receiver,pending,finishing) if task is not None]
                     for task in tasks:task.cancel()
                     await asyncio.gather(*tasks,return_exceptions=True)
+        except ProviderError as exc:
+            exc.diagnostics.update(provider_task_id=task_id,exception_type=type(exc).__name__,retryable=exc.retryable)
+            raise
+        except InvalidMessage as exc:
+            raise ProviderError('upstream_handshake_invalid','识别服务 WebSocket 握手响应无效，请检查服务端网络或代理。',
+                diagnostics={'timeout_phase':'handshake','exception_type':type(exc).__name__,
+                    'cause_type':type(exc.__cause__).__name__ if exc.__cause__ else None,'provider_task_id':task_id}) from exc
         except InvalidStatus as exc:
             # Classify a handshake failure before audio submission; never log
             # authorization headers or the raw provider response body.
@@ -352,13 +385,16 @@ class AliyunProvider:
                         code = str(data.get("code", ""))
             except (ValueError, TypeError):
                 pass
-            raise classify_error(exc.response.status_code, code) from exc
+            error=classify_error(exc.response.status_code, code)
+            error.diagnostics.update(provider_error_code=safe_provider_code(code),provider_task_id=task_id,timeout_phase='handshake')
+            raise error from exc
         except ConnectionClosed as exc:
             close_code=exc.rcvd.code if exc.rcvd else (exc.sent.code if exc.sent else 1006)
             raise ProviderError('upstream_disconnected',f'阿里云识别连接已断开（关闭码 {close_code}），已停止采集。已保存字幕保留，请手动重新开始。',
-                                diagnostics={'upstream_close_code':close_code}) from exc
+                                diagnostics={'upstream_close_code':close_code,'provider_task_id':task_id,'exception_type':type(exc).__name__}) from exc
         except (TimeoutError, asyncio.TimeoutError) as exc:
-            raise classify_error(408) from exc
+            error=classify_error(408);error.diagnostics.update(timeout_phase=phase,provider_task_id=task_id)
+            raise error from exc
         except OSError as exc:
             raise ProviderError('network_error','无法连接阿里云或网络连接已中断，请检查服务器网络。') from exc
 

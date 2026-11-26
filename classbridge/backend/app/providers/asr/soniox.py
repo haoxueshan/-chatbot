@@ -8,7 +8,7 @@ from collections import deque
 from websockets.asyncio.client import connect as WebSocketConnect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 from app.providers.aliyun import ProviderError, classify_error
-from app.providers.transport import tls_context
+from app.providers.transport import tls_context, ASRResultQueue
 
 ENDPOINT='wss://stt-rt.soniox.com/transcribe-websocket'
 
@@ -160,7 +160,7 @@ class SonioxASRAdapter:
                         if first.get('tokens') or first.get('finished'):raise ProviderError('protocol_error','Soniox 在发送音频前返回了异常识别数据。')
                 metrics['last_event_monotonic']=time.monotonic()
                 if on_ready:await on_ready()
-                mapper=TokenMapper();queue=asyncio.Queue(maxsize=64);lock=asyncio.Lock()
+                mapper=TokenMapper();queue=ASRResultQueue(metrics);lock=asyncio.Lock()
                 finish_at=None;finishing=asyncio.get_running_loop().create_future();receiver=None;pending=None
                 async def send(value):
                     async with lock:await ws.send(value)
@@ -169,10 +169,19 @@ class SonioxASRAdapter:
                     async for frame in audio:
                         if not frame or len(frame)%2 or len(frame)>32000:raise ProviderError('format_error','需要 PCM16LE 单声道 16kHz 音频。')
                         stamp=time.monotonic()
+                        metrics.update(upstream_inflight_pcm_bytes=len(frame),send_started_monotonic=stamp)
                         try:await asyncio.wait_for(send(frame),send_timeout)
-                        except TimeoutError as exc:raise ProviderError('upstream_send_timeout','向 Soniox 发送音频超时。') from exc
-                        metrics.update(send_wait_ms=int((time.monotonic()-stamp)*1000),last_send_monotonic=time.monotonic())
-                        metrics['sent_audio_ms']+=len(frame)/32
+                        except BaseException as exc:
+                            metrics['uncertain_delivery_pcm_bytes']=metrics.get('uncertain_delivery_pcm_bytes',0)+len(frame)
+                            if isinstance(exc,TimeoutError):raise ProviderError('upstream_send_timeout','向 Soniox 发送音频超时。',diagnostics={'timeout_phase':'audio_send'}) from exc
+                            raise
+                        else:
+                            metrics['last_send_monotonic']=time.monotonic()
+                            metrics['sent_audio_ms']+=len(frame)/32
+                            metrics['upstream_sent_pcm_bytes']=metrics.get('upstream_sent_pcm_bytes',0)+len(frame)
+                        finally:
+                            metrics['send_wait_ms']=int((time.monotonic()-stamp)*1000)
+                            metrics['upstream_inflight_pcm_bytes']=0;metrics.pop('send_started_monotonic',None)
                         await asyncio.sleep(0)
                     finish_at=time.monotonic();finishing.set_result(None)
                     await asyncio.wait_for(send(''),send_timeout) # Empty TEXT ends input, not empty bytes.

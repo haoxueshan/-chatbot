@@ -6,8 +6,14 @@ import { applyEvent, initialTranscript, orderedSegments } from "./events";
 import type { BridgeEvent, Session } from "./types";
 import type { CaptureHealth } from "./captureHealth";
 import type { ASRLanguageMode } from "./asrLanguages";
+import { browserAudioLimits, type AudioRuntime } from "./audioRuntime";
 
-export function useLive(session: Session, onSaved: () => void, audioOptions: AudioInputOptions = {}) {
+export function useLive(session: Session, onSaved: () => void, audioOptions: AudioInputOptions = {}, runtime?: AudioRuntime) {
+  const audioLimits=useRef(browserAudioLimits(runtime));
+  const browserMetrics=useRef({captured_pcm_bytes:0,rejected_pcm_bytes:0,buffered_audio_ms_estimated:0});
+  const [browserBufferMs,setBrowserBufferMs]=useState(0);
+  const lostIncident=useRef<{incident_id:string;capture_id:string}|null>(null);
+  const captureFailed=useRef(false);
   const [transcript, setTranscript] = useState(() =>
     initialTranscript(session.id, session.segments, session.unconfirmed_segments, session.target_language),
   );
@@ -54,7 +60,6 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
   saved.current = onSaved;
   const stop = useCallback((reason?: string) => {
     generation.current++;
-    setHealth(undefined);
     setEffectiveASR(undefined);
     clearTimeout(readyTimer.current);
     setPreparing(false);
@@ -73,8 +78,10 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     if (ws.current?.readyState === WebSocket.OPEN && hadStarted) {
       try {
         if (reason)
-          ws.current.send(JSON.stringify({ type: "capture.gap", reason, duration_ms: null }));
-        ws.current.send(JSON.stringify({ type: "stop" }));
+          ws.current.send(JSON.stringify({ type: "capture.gap", reason, duration_ms: null,
+            capture_id:captureRequest.current,incident_id:`${captureRequest.current}:failure`,
+            browser_diagnostics:browserMetrics.current }));
+        ws.current.send(JSON.stringify({ type: "stop",user_initiated:!reason && !captureFailed.current }));
         setSettling(true);
       } catch {
         setSettling(false);
@@ -126,10 +133,13 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
             JSON.stringify({
               type: "capture.gap",
               reason: lastGap.current,
-              duration_ms: 0,
+              duration_ms: null,
+              gap_kind:"connection_recovered",
+              ...lostIncident.current,
             }),
           );
           lastGap.current = null;
+          lostIncident.current=null;
         }
       },
       onNotice: (message) => {
@@ -168,6 +178,8 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
           if (e.task_kind || currentCapture || !captureRequest.current)
             setNotice(e.message || "处理失败，请检查设置或重试");
           if (activeRef.current && currentCapture) {
+            captureFailed.current=true;
+            if (e.diagnostics) setHealth(e.diagnostics);
             // A rejected start never created an upstream capture to drain.
             if (!e.event_seq) startSent.current = false;
             stop();
@@ -191,6 +203,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
             activeRef.current
           ) {
             activeStream.current = e.stream_id || null;
+            audioLimits.current=browserAudioLimits(e.audio_runtime);
             if (!started.current) {
               total.current = e.captured_ms ?? total.current;
               setElapsed(total.current);
@@ -222,10 +235,10 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
             ["stopped", "completed", "idle", "failed"].includes(state || "") &&
             currentCapture
           ) {
+            if (e.diagnostics) setHealth(e.diagnostics);
             generation.current++;
             captureRequest.current = null;
             activeStream.current = null;
-            setHealth(undefined);
             setEffectiveASR(undefined);
             clearTimeout(readyTimer.current);
             setPreparing(false);
@@ -257,6 +270,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
         setSettling(false);
         setQueue(0);
         if (activeRef.current) {
+          if(captureRequest.current)lostIncident.current={capture_id:captureRequest.current,incident_id:`${captureRequest.current}:failure`};
           lastGap.current =
             "网络连接中断，此时段音频未恢复；重新连接后需手动开始";
           stop();
@@ -294,6 +308,8 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
           total.current + (started.current ? Date.now() - started.current : 0);
         setElapsed(duration);
         setQueue(Math.ceil((ws.current?.bufferedAmount || 0) / 640));
+        const buffered=(ws.current?.bufferedAmount || 0)/32;
+        browserMetrics.current.buffered_audio_ms_estimated=buffered;setBrowserBufferMs(buffered);
         if (duration >= 105 * 60 * 1000)
           stop("已达到单次录音 105 分钟的应用限制。此限制不是账户消费上限。");
       }
@@ -339,6 +355,9 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     const requestGeneration = ++generation.current;
     captureRequest.current = `${requestGeneration}:${Date.now()}`;
     activeStream.current = null;
+    audioLimits.current=browserAudioLimits(runtime);
+    captureFailed.current=false;
+    browserMetrics.current={captured_pcm_bytes:0,rejected_pcm_bytes:0,buffered_audio_ms_estimated:0};setBrowserBufferMs(0);
     const socket = ws.current;
     requestSequence.current = sequence.current;
     try {
@@ -349,12 +368,16 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
           (frame) => {
             if (requestGeneration !== generation.current) return;
             if (!startSent.current || !started.current) return;
+            browserMetrics.current.captured_pcm_bytes+=frame.byteLength;
             if (socket !== ws.current || socket.readyState !== WebSocket.OPEN) {
+              browserMetrics.current.rejected_pcm_bytes+=frame.byteLength;
               stop("连接断开，已停止采集");
               return;
             }
-            if (!audioBufferFits(socket.bufferedAmount, frame.byteLength)) {
-              stop("音频发送积压将超过 2 秒，当前帧尚未发送，已停止采集");
+            if (!audioBufferFits(socket.bufferedAmount, frame.byteLength,audioLimits.current.max)) {
+              browserMetrics.current.rejected_pcm_bytes+=frame.byteLength;
+              browserMetrics.current.buffered_audio_ms_estimated=socket.bufferedAmount/32;
+              stop(`音频发送积压将超过 ${audioLimits.current.max/1000} 秒，当前帧尚未发送，已停止采集`);
               return;
             }
             try { socket.send(frame); }
@@ -422,6 +445,8 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     elapsed,
     notice,
     health,
+    browserBufferMs,
+    browserBufferWarning:browserBufferMs>=audioLimits.current.warning,
     asrLanguageMode,
     effectiveASR,
     translationTarget,

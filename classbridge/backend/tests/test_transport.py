@@ -114,11 +114,14 @@ def test_glossary_reports_skipped_terms_and_normalizes_korean_without_inventing_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('delay_ms',[100,300,500,1000,2000])
-async def test_pcm_jitter_budget_order_and_full_stop(factory,delay_ms):
+async def test_pcm_jitter_budget_order_and_full_stop(factory,delay_ms,monkeypatch):
     """Hold the first send while exactly delay_ms/20 incoming frames arrive.
 
     Virtual audio cadence: deterministic queue load, no network/timer randomness.
     """
+    from app.config import settings
+    # Explicit legacy queue boundary plus one in-flight 20 ms frame.
+    monkeypatch.setattr(settings,'audio_queue_max_ms',2020)
     with factory() as db:seed(db,mode='real')
     c=LiveCapture(AsyncMock(),'lesson','alice');c.stream_id='stream';c.mode='real';c.ready=True;c.started=time.monotonic()
     entered=asyncio.Event();release=asyncio.Event();sent=[]

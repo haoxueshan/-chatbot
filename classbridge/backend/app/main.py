@@ -37,12 +37,20 @@ async def lifespan(app):
         db.commit()
     worker=None
     if settings.task_mode=='local':
-        from app.workers.tasks import local_worker_loop
-        worker=asyncio.create_task(local_worker_loop())
-    yield
-    if worker:
-        worker.cancel()
-        with contextlib.suppress(asyncio.CancelledError):await worker
+        from app.workers.tasks import isolated_local_worker_loop
+        worker=asyncio.create_task(isolated_local_worker_loop())
+    from app.services.audio_diagnostics import loop_health
+    monitor=asyncio.create_task(loop_health.run()) if settings.asr_diagnostics_enabled else None
+    try:yield
+    finally:
+        try:
+            if worker:
+                worker.cancel()
+                with contextlib.suppress(asyncio.CancelledError):await worker
+        finally:
+            if monitor:
+                monitor.cancel()
+                with contextlib.suppress(asyncio.CancelledError):await monitor
 
 
 app=FastAPI(title=settings.app_name,version='1.0.0',lifespan=lifespan,docs_url='/api/docs',openapi_url='/api/openapi.json')

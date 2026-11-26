@@ -73,7 +73,8 @@ def test_sweep_preserves_other_tasks_and_audit_results(factory):
         db.commit()
         assert cancel_retired_tasks(db)==1;db.commit()
         assert cancel_retired_tasks(db)==0
-        assert tasks.pending_task_ids(db)==ids[:-1]
+        assert set(tasks.pending_task_ids(db))==set(ids[:-1])
+        assert tasks.pending_task_ids(db)[0]==ids[0] # Formal translation always has priority.
         assert db.query(ProcessingTask).count()==7 and db.query(Outbox).count()==7
 
 

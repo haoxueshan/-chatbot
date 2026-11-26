@@ -279,7 +279,7 @@ test("ASR session selection patches only idle session and keeps the same WebSock
   assert.equal(Socket.instances.length,1);assert.equal(socket.closed,false);
 });
 
-for (const failure of ["backpressure", "closed", "send-throws"]) {
+for (const failure of ["backpressure", "configured-backpressure", "closed", "send-throws"]) {
   test(`audio ${failure} releases capture once and rejects late frames`, async () => {
     const { useLive } = await import("../src/lib/useLive.ts");
     const { AudioCapture } = await import("../src/lib/audio.ts");
@@ -294,8 +294,10 @@ for (const failure of ["backpressure", "closed", "send-throws"]) {
       await act(async () => socket.open());
       await act(async () => state.start());
       const request = socket.sent.find(e => e.type === "start").request_id;
-      await act(async () => socket.event({type:"session.state",session_id:other.id,stream_id:"current",request_id:request,event_seq:1,state:"recording",ready:true}));
-      socket.bufferedAmount = 63360;
+      const configured=failure==="configured-backpressure";
+      await act(async () => socket.event({type:"session.state",session_id:other.id,stream_id:"current",request_id:request,event_seq:1,state:"recording",ready:true,
+        ...(configured?{audio_runtime:{browser_buffer_warning_ms:1500,browser_buffer_max_ms:8000}}:{})}));
+      socket.bufferedAmount = (configured?8000:2000)*32-640;
       const send = socket.send.bind(socket);
       let frames = 0, controls = 0;
       socket.send = ((data: string | ArrayBuffer) => {
@@ -308,12 +310,18 @@ for (const failure of ["backpressure", "closed", "send-throws"]) {
           send(data);
         }
       }) as typeof socket.send;
+      if(configured){
+        socket.bufferedAmount=1600*32;
+        await act(async()=>onFrame(new ArrayBuffer(640)));
+        assert.equal(state.active,true,"warning does not stop capture");assert.equal(stopped,0);
+        frames=0;socket.bufferedAmount=8000*32-640;
+      }
       if (failure === "closed") socket.readyState = 3;
       await act(async () => { onFrame(new ArrayBuffer(640)); onFrame(new ArrayBuffer(640)); onFrame(new ArrayBuffer(640)); });
       assert.equal(state.active, false);
       assert.equal(stopped, 1);
-      assert.equal(frames, failure === "backpressure" ? 1 : 0);
-      assert.equal(controls, failure === "backpressure" ? 2 : failure === "send-throws" ? 1 : 0);
+      assert.equal(frames, failure.includes("backpressure") ? 1 : 0);
+      assert.equal(controls, failure.includes("backpressure") ? 2 : failure === "send-throws" ? 1 : 0);
       if (failure === "send-throws") assert.equal(socket.closed, true);
       await act(async () => state.stop());
       assert.equal(stopped, 1);

@@ -68,6 +68,7 @@ def read_settings(user: User = Depends(current_user), db: DBSession = Depends(ge
     except ProviderError as exc:aliyun_error={'code':exc.code,'message':exc.message}
     return {**preferences, 'asr_terms_status':{'enabled_count':len(report['vocabulary']),'skipped':report['skipped']},
       'translation_runtime': translation_runtime_status(),
+      'audio_runtime': settings.audio_runtime(),
       'real_ready': config_error is None, 'configuration_error':config_error,
       'default_asr_profile_id':profile.id if profile else None,'aliyun_services_error':aliyun_error,
       'model_status': config_error['code'] if config_error else 'configured_unverified',

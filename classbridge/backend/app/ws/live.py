@@ -15,7 +15,8 @@ from anyio import CancelScope
 from app.api.auth import authenticate_cookie, COOKIE_NAME
 from app.config import settings
 from app.db import SessionLocal
-from app.providers.transport import blocking_call, PCM_BYTES_PER_MS, PCM_QUEUE_BYTES
+from app.providers.transport import blocking_call, PCM_BYTES_PER_MS
+from app.services.audio_diagnostics import captures, process_buffer_bytes, buffering_state, loop_health
 from app.models import Session, RecognitionStream, Event, AudioAsset, User, ProcessingTask, SegmentRevision, uid
 from app.services.events import emit, save_final, enqueue, save_interrupted, latest_segments
 from app.services.timing import captured_duration_ms
@@ -38,7 +39,7 @@ DEMO_SENTENCES=[
 class LiveCapture:
     def __init__(self,ws,session_id,user_id):
         self.ws=ws;self.session_id=session_id;self.user_id=user_id
-        self.queue=asyncio.Queue(maxsize=PCM_QUEUE_BYTES//2)
+        self.queue=asyncio.Queue(maxsize=4096)
         self.stream_id=None;self.mode=None;self.offset=0;self.started=0;self.task=None
         self.stopping=False;self.current_revisions={};self.finalized=set();self.last_results={};self.final_results=set();self.translation_tasks={}
         self.last_translation={};self.first_seen={};self.audio_file=None;self.audio_path=None;self.audio_id=None;self.audio_bytes=0
@@ -66,6 +67,20 @@ class LiveCapture:
         self.database_lock=asyncio.Lock()
         self.queued_frames=0
         self.subtitle_send_wait_ms=0;self.pending_processing_tasks=0
+        self.audio_runtime=settings.audio_runtime()
+        self.rejected_pcm_bytes=0;self.buffers_released=False;self.stop_announced=False
+        self.first_failure_code=None
+        self.confirmed_missing_pcm_bytes=0
+        self.archived_pcm_bytes=0
+
+    def outstanding_bytes(self):
+        # Includes iterator read-ahead, batching and in-flight sends, not only queue nodes.
+        return max(0,round(self.received_audio_ms*PCM_BYTES_PER_MS)-round(self.asr_metrics.get('sent_audio_ms',0)*PCM_BYTES_PER_MS))
+
+    def buffer_bytes(self):
+        if self.buffers_released:return 0
+        # Conservative allowance for contiguous batch/archive copies and queue nodes.
+        return 2*(self.outstanding_bytes()+self.archive_bytes)+(self.queued_frames+len(self.archive_queue))*128+(65536 if self.audio_id else 0)
 
     async def write_database(self,function):
         # Preserve per-capture transaction ordering, including SQLite, while
@@ -169,7 +184,9 @@ class LiveCapture:
             self.pending_processing_tasks=pending
             from app.providers.aliyun import ProviderError
             if not allowed:raise ProviderError('capture_state_changed','会话已停止或采集权限状态发生变化。')
-            if pending>=200:raise ProviderError('task_backlog','后台待处理任务达到200项，已停止采集。')
+            if pending>=settings.processing_backlog_hard_limit:
+                self.signal_stop()
+                raise ProviderError('processing_capacity_exceeded','后台持久化任务达到硬容量上限，已安全停止；已有任务保留。')
 
     async def archive_audio(self):
         while True:
@@ -178,7 +195,7 @@ class LiveCapture:
 
     async def flush_archive(self):
         if not self.archive_queue:return
-        # One serialized disk batch, at most 2 seconds. Bytes in flight still
+        # One serialized disk batch, bounded by the configured archive budget. Bytes in flight still
         # count against the archive budget until write completion.
         batch=b''.join(self.archive_queue);self.archive_queue.clear()
         written=False
@@ -224,12 +241,16 @@ class LiveCapture:
             self.stream_id=uid();self.mode=row.mode;self.offset=row.duration_ms;self.started=0;self.stopping=False
             self.ready=False;self.request_id=request_id
             self.asr_metrics={};self.failure_reported=False
+            self.audio_runtime=settings.audio_runtime();self.rejected_pcm_bytes=0;self.buffers_released=False
+            self.stop_announced=False;self.first_failure_code=None
+            self.confirmed_missing_pcm_bytes=0
+            self.archived_pcm_bytes=0
             self.subtitle_send_wait_ms=0;self.pending_processing_tasks=0
             self.received_audio_ms=0;self.last_audio_at=None;self.level_window.clear()
             self.preview=None
             self.unconfirmed={}
             self.capture_ended=None;self.last_backlog_check=0
-            self.queue=asyncio.Queue(maxsize=PCM_QUEUE_BYTES//2)
+            self.queue=asyncio.Queue(maxsize=4096)
             self.queued_bytes=0;self.queued_frames=0;self.audio_queue_peak=0
             self.archive_queue.clear();self.archive_bytes=0
             self.delivery_pending.clear();self.delivery_failed=None;self.preview_terms=None
@@ -260,12 +281,14 @@ class LiveCapture:
                     self.offset=max(row.duration_ms,int((datetime.now(timezone.utc)-origin).total_seconds()*1000))
                     if self.offset>row.duration_ms+500:
                         emit(db,row,'capture.gap',stream_id=self.stream_id,start_ms=row.duration_ms,end_ms=self.offset,
+                             gap_kind='user_paused',incident_id=f'{self.stream_id}:pause',reason_code='between_captures',
                              duration_ms=self.offset-row.duration_ms,status='gap',message='两次采集之间的暂停或断线时段没有音频')
             self.started=time.monotonic();self.ready=True
             stream=db.get(RecognitionStream,self.stream_id)
             stream.status='active';stream.offset_ms=self.offset;stream.created_at=datetime.now(timezone.utc)
             row.status='recording';row.duration_ms=self.offset
             emit(db,row,'session.state',state='recording',status='recording',ready=True,request_id=self.request_id,
+                 audio_runtime=self.audio_runtime,
                  offset_ms=self.offset,captured_ms=self.captured_before,asr_language_mode=self.asr_language_mode,asr_acoustic_profile=self.asr_acoustic_profile,asr_enhancement=self.asr_enhancement,
                  **({'asr_provider':self.asr_snapshot['provider'],'asr_model':self.asr_snapshot['model_id'],
                      'asr_effective_language_hints':list(self.asr_snapshot['language_hints'] or [])} if self.asr_snapshot else {}),
@@ -279,18 +302,30 @@ class LiveCapture:
             db.commit()
 
     async def audio(self,data):
-        if not self.task or self.task.done() or self.stopping or self.mode!='real': return
+        if not self.task or self.task.done() or self.stopping or self.mode!='real':
+            self.rejected_pcm_bytes+=len(data)
+            return
         if not self.ready:
             await self.fail('capture_not_ready','识别服务尚未就绪，请刷新页面后重新开始，等待准备完成再说话')
             await self.stop();return
         if not data or len(data)>32000 or len(data)%2:
             await self.fail('audio_format','音频必须为 16 kHz 单声道 PCM16LE，单帧不超过一秒');await self.stop();return
-        if self.queue.full() or self.queued_bytes+len(data)>PCM_QUEUE_BYTES:
-            await self.gap('音频队列已满',None);await self.fail('audio_backlog','音频转发积压超过 2 秒，已停止采集；请检查服务器到阿里云的网络后重新开始。');await self.stop();return
+        captures.add(self)
+        projected=self.buffer_bytes()+(2*len(data)+128)*(2 if self.audio_file else 1)
+        capacity=(self.queue.full() or self.outstanding_bytes()+len(data)>self.audio_runtime['server_queue_max_ms']*PCM_BYTES_PER_MS)
+        memory=(projected>settings.audio_max_total_buffer_bytes or process_buffer_bytes()-self.buffer_bytes()+projected>settings.audio_process_max_buffer_bytes)
+        if capacity or memory:
+            self.rejected_pcm_bytes+=len(data);self.signal_stop()  # BEFORE any slow persistence.
+            self.confirmed_missing_pcm_bytes+=len(data)
+            await self.fail('audio_memory_limit' if memory else 'audio_backlog','音频缓冲达到容量上限，已停止接收新音频；正在处理已接收音频。')
+            await self.gap('音频缓冲达到上限，当前帧未被接收',len(data)/PCM_BYTES_PER_MS,kind='audio_missing',reason_code='admission_rejected')
+            await self.stop();return
         if self.audio_file:
-            if self.archive_bytes+len(data)>PCM_QUEUE_BYTES:
-                await self.fail('audio_storage_backlog','保留音频写入积压超过2秒，已停止采集。')
-                await self.gap('音频保存队列已满，当前帧未接收',len(data)/PCM_BYTES_PER_MS)
+            if len(self.archive_queue)>=4096 or self.archive_bytes+len(data)>self.audio_runtime['archive_queue_max_ms']*PCM_BYTES_PER_MS:
+                self.rejected_pcm_bytes+=len(data);self.signal_stop()
+                self.confirmed_missing_pcm_bytes+=len(data)
+                await self.fail('audio_storage_backlog','保留音频写入达到容量上限，已停止采集。')
+                await self.gap('音频保存队列已满，当前帧未接收',len(data)/PCM_BYTES_PER_MS,kind='audio_missing',reason_code='archive_admission_rejected')
                 await self.stop();return
             self.archive_queue.append(data);self.archive_bytes+=len(data)
         self.queue.put_nowait(data);self.queued_bytes+=len(data);self.queued_frames+=1
@@ -308,6 +343,29 @@ class LiveCapture:
         level=[(energy,count) for at,energy,count in self.level_window if stamp-at<=1]
         rms=math.sqrt(sum(e for e,_ in level)/sum(n for _,n in level)) if level else 0
         return {'queue_frames':self.queued_frames,'queued_audio_ms':self.queued_bytes/PCM_BYTES_PER_MS,
+                'server_received_pcm_bytes':round(self.received_audio_ms*PCM_BYTES_PER_MS),
+                'server_queued_pcm_bytes':self.queued_bytes,
+                'batch_pending_pcm_bytes':self.asr_metrics.get('batch_pending_pcm_bytes',0),
+                'upstream_inflight_pcm_bytes':self.asr_metrics.get('upstream_inflight_pcm_bytes',0),
+                'upstream_sent_pcm_bytes':round(self.asr_metrics.get('sent_audio_ms',0)*PCM_BYTES_PER_MS),
+                'archive_pending_pcm_bytes':self.archive_bytes,'archive_written_pcm_bytes':self.audio_bytes,'archived_pcm_bytes':self.archived_pcm_bytes,
+                'recovery_buffer_pcm_bytes':0,'recovery_attempts':0,'rejected_pcm_bytes':self.rejected_pcm_bytes,
+                'uncertain_delivery_pcm_bytes':self.asr_metrics.get('uncertain_delivery_pcm_bytes',0),
+                'unsent_pcm_bytes':self.asr_metrics.get('unsent_pcm_bytes',0),
+                'buffer_state':buffering_state(self.outstanding_bytes()/PCM_BYTES_PER_MS,
+                    self.audio_runtime['server_queue_warning_ms'],self.audio_runtime['server_queue_high_water_ms'],self.audio_runtime['server_queue_max_ms']),
+                'buffer_total_bytes':self.buffer_bytes(),'process_buffer_total_bytes':process_buffer_bytes(),
+                'current_send_wait_ms':round((stamp-self.asr_metrics['send_started_monotonic'])*1000,2) if self.asr_metrics.get('send_started_monotonic') is not None else 0,
+                'first_failure_code':self.first_failure_code,
+                'confirmed_missing_pcm_bytes':self.confirmed_missing_pcm_bytes,
+                'capture_state':'STOPPING' if self.stopping else 'CAPTURING' if self.ready else 'PREPARING',
+                'asr_state':'FAILED' if self.failure_reported else 'DRAINING' if self.stopping else 'DEGRADED' if self.outstanding_bytes()/32>=self.audio_runtime['server_queue_high_water_ms'] else 'STREAMING' if self.ready else 'CONNECTING',
+                'processing_state':buffering_state(self.pending_processing_tasks,settings.processing_backlog_warning,
+                    settings.processing_backlog_degraded,settings.processing_backlog_hard_limit),
+                **{key:self.asr_metrics.get(key,0) for key in ('asr_result_queue_size','asr_result_queue_peak',
+                    'asr_result_consume_ms','asr_result_consume_p95_ms','asr_partial_received','asr_partial_coalesced',
+                    'asr_final_received','asr_final_committed')},
+                **loop_health.snapshot(),
                 'audio_queue_peak_ms':self.audio_queue_peak/PCM_BYTES_PER_MS,
                 'archive_queue_ms':self.archive_bytes/PCM_BYTES_PER_MS,
                 'preview_metrics':{**self.translation_metrics,**({**self.preview.metrics,
@@ -330,13 +388,19 @@ class LiveCapture:
                 'last_send_age_ms':int((stamp-self.asr_metrics['last_send_monotonic'])*1000) if self.asr_metrics.get('last_send_monotonic') else None,
                 'last_upstream_event_age_ms':int((stamp-self.asr_metrics['last_event_monotonic'])*1000) if self.asr_metrics.get('last_event_monotonic') else None}
 
-    async def gap(self,reason,duration_ms=None):
+    async def gap(self,reason,duration_ms=None,*,kind='asr_result_uncertain',reason_code=None,incident_id=None,capture_id=None,browser_diagnostics=None):
+        from app.services.capture_incidents import fields
+        metadata=fields(capture_id or self.request_id,self.stream_id,kind,reason_code or self.first_failure_code,duration_ms,incident_id)
+        browser={k:v for k,v in (browser_diagnostics or {}).items() if k in ('captured_pcm_bytes','rejected_pcm_bytes','buffered_audio_ms_estimated')
+            and isinstance(v,(int,float)) and math.isfinite(v) and 0<=v<=2**40}
         def persist():
             with SessionLocal() as db:
                 row=db.get(Session,self.session_id)
                 if not row:return
-                payload=emit(db,row,'capture.gap',stream_id=self.stream_id,status='gap',start_ms=self.offset+int((time.monotonic()-self.started)*1000) if self.started else row.duration_ms,
-                             duration_ms=duration_ms,message=str(reason)[:500])
+                payload=emit(db,row,'capture.gap',stream_id=self.stream_id,status='gap',
+                             start_ms=self.offset+int(self.received_audio_ms) if self.started else row.duration_ms,
+                             message=str(reason)[:500],provider=(self.asr_snapshot or {}).get('provider'),
+                             browser_diagnostics=browser,**metadata)
                 if self.audio_id:
                     asset=db.get(AudioAsset,self.audio_id)
                     if asset:asset.gaps=[*(asset.gaps or []),payload]
@@ -345,19 +409,22 @@ class LiveCapture:
 
     async def fail(self,code,message,diagnostics=None):
         if self.failure_reported:return
-        self.failure_reported=True
+        self.failure_reported=True;self.first_failure_code=code
         details={**self.diagnostics(),**(diagnostics or {})}
         logger.warning('capture_failed session_id=%s stream_id=%s code=%s diagnostics=%s',self.session_id,self.stream_id,code,details)
         def persist():
             with SessionLocal() as db:
                 row=db.get(Session,self.session_id)
                 if row:
-                    emit(db,row,'processing.failed',stream_id=self.stream_id,request_id=self.request_id,code=str(code),message=str(message)[:500],status='failed',diagnostics=details)
+                    emit(db,row,'processing.failed',stream_id=self.stream_id,request_id=self.request_id,
+                         incident_id=f'{self.request_id or self.stream_id}:failure',
+                         code=str(code),message=str(message)[:500],status='failed',diagnostics=details)
                     db.commit()
         await self.write_database(persist)
 
     async def stop(self):
-        first=not self.stopping
+        first=not self.stop_announced
+        self.stop_announced=True
         self.signal_stop()
         if not self.task or self.task.done() or self.task is asyncio.current_task():return
         if first:
@@ -607,6 +674,7 @@ class LiveCapture:
             # Only committed or verified idempotent final results own these markers.
             self.current_revisions[sid]=revision;self.last_results[sid]=result
             self.finalized.add(sid);self.final_results.add(fingerprint);self.unconfirmed.pop(sid,None)
+            self.asr_metrics['asr_final_committed']=self.asr_metrics.get('asr_final_committed',0)+1
             if lease and len(self.final_translations)<settings.preview_max_sentences:
                 key=(sid,revision)
                 task=asyncio.create_task(self.finish_final_translation(sid,revision,text,preview_entry,lease))
@@ -682,12 +750,19 @@ class LiveCapture:
                     profile=preferences.get('asr_acoustic_profile','far')
                     self.asr_acoustic_profile=profile if profile in ('far','near') else 'far'
                 async def recognize():
+                    consume_samples=deque(maxlen=120)
                     self.dispatch_started.set()
                     stream=self.asr_provider.stream_asr(self.audio_iter(),on_ready=self.mark_ready,metrics=self.asr_metrics,
                         vocabulary=vocabulary,context=context,language_hints=self.asr_snapshot['language_hints'] if self.asr_snapshot else asr_language_hints(self.asr_language_mode),
                         vad_model='near_meeting_16k' if self.asr_acoustic_profile=='near' else 'far_field_meeting_16k')
                     async with contextlib.aclosing(stream):
-                        async for event in stream:await self.consume(event)
+                        async for event in stream:
+                            stamp=time.monotonic();await self.consume(event)
+                            elapsed=(time.monotonic()-stamp)*1000
+                            consume_samples.append(elapsed)
+                            self.asr_metrics['asr_result_consume_ms']=round(elapsed,2)
+                            ordered=sorted(consume_samples)
+                            self.asr_metrics['asr_result_consume_p95_ms']=round(ordered[min(len(ordered)-1,int(len(ordered)*.95))],2)
                 processing=asyncio.create_task(recognize())
                 workers=[t for t in (periodic,health,preview_timer,maintenance,archive,self.delivery) if t]
                 done,_=await asyncio.wait([processing,*workers],return_when=asyncio.FIRST_COMPLETED)
@@ -710,8 +785,9 @@ class LiveCapture:
             from app.providers.aliyun import ProviderError
             await self.fail(exc.code if isinstance(exc,ProviderError) else 'upstream_error',
                 exc.message if isinstance(exc,ProviderError) else '识别处理异常，已停止采集；请检查服务器诊断日志。',
-                {**(exc.diagnostics if isinstance(exc,ProviderError) else {}),'exception_type':type(exc).__name__})
-            if self.ready and not self.stopping:await self.gap('上游任务异常结束，未定稿音频无法恢复',None)
+                {**(exc.diagnostics if isinstance(exc,ProviderError) else {}),'exception_type':type(exc).__name__,
+                 'retryable':bool(isinstance(exc,ProviderError) and exc.retryable)})
+            if self.ready and not self.stopping:await self.gap('识别任务异常结束，部分音频的识别结果尚未确认',None,kind='asr_interrupted')
         finally:
             self.dispatch_started.set()
             self.signal_stop()
@@ -742,8 +818,9 @@ class LiveCapture:
                         key=asset.storage_key if asset else None
                     if key and self.audio_bytes:
                         from app.services.storage import get_storage
-                        def store_audio():get_storage().put(key,self.audio_path.read_bytes())
+                        def store_audio():get_storage().put_file(key,self.audio_path)
                         await blocking_call(store_audio)
+                        self.archived_pcm_bytes=self.audio_bytes
                     with SessionLocal() as db:
                         asset=db.get(AudioAsset,self.audio_id)
                         if asset:
@@ -755,6 +832,7 @@ class LiveCapture:
                         asset=db.get(AudioAsset,self.audio_id)
                         if asset:asset.status='failed';db.commit()
                     await self.fail('audio_storage_failed','音频文件保存失败，已保存的文字仍保留；请检查服务器存储空间。',{'exception_type':type(exc).__name__})
+                    await self.gap('音频文件发布失败；私有临时文件保留，未计入已持久化音频',None,kind='storage_failed',reason_code='audio_storage_failed')
                 finally:
                     if self.audio_file:
                         try:await blocking_call(self.audio_file.close)
@@ -765,6 +843,11 @@ class LiveCapture:
                     if saved_audio:
                         with contextlib.suppress(OSError):self.audio_path.unlink(missing_ok=True)
             try:
+                # Account BEFORE releasing queues. send() completion is not an
+                # ASR acknowledgement; an interrupted send remains uncertain.
+                self.asr_metrics['unsent_pcm_bytes']=max(0,self.outstanding_bytes()-self.asr_metrics.get('uncertain_delivery_pcm_bytes',0))
+                final_diagnostics={**self.diagnostics(),'capture_state':'STOPPED',
+                    'asr_state':'FAILED' if self.failure_reported else 'CLOSED'}
                 def finalize():
                     with SessionLocal() as db:
                         row=db.get(Session,self.session_id)
@@ -775,7 +858,17 @@ class LiveCapture:
                         if row and row.active_stream_id==self.stream_id:
                             row.duration_ms=max(row.duration_ms,self.offset+elapsed)
                             for snapshot in self.unconfirmed.values():save_interrupted(db,row.id,self.stream_id,snapshot)
-                            row.status='stopped';emit(db,row,'session.state',state='stopped',status='stopped',captured_ms=self.captured_before+elapsed,request_id=self.request_id)
+                            if self.outstanding_bytes():
+                                from app.services.capture_incidents import fields
+                                payload=emit(db,row,'capture.gap',stream_id=self.stream_id,status='gap',
+                                    start_ms=self.offset+int(self.received_audio_ms),
+                                    message='部分已接收音频未确认完成发送或识别；请查看收尾诊断与音频保存状态',
+                                    diagnostics=final_diagnostics,
+                                    **fields(self.request_id,self.stream_id,'asr_result_uncertain',self.first_failure_code,None))
+                                if self.audio_id:
+                                    asset=db.get(AudioAsset,self.audio_id)
+                                    if asset:asset.gaps=[*(asset.gaps or []),payload]
+                            row.status='stopped';emit(db,row,'session.state',state='stopped',status='stopped',captured_ms=self.captured_before+elapsed,request_id=self.request_id,diagnostics=final_diagnostics)
                             if self.ready and latest_segments(db,row.id):enqueue(db,row.user_id,'summarize',f'summary:stop:{self.stream_id}',{'session_id':row.id,'user_id':row.user_id},session_id=row.id)
                             row.active_stream_id=None
                         db.commit()
@@ -786,6 +879,11 @@ class LiveCapture:
                 with contextlib.suppress(Exception):
                     await self.transient('processing.failed',request_id=self.request_id,code='source_storage_failed',
                         message='未确认原文或停止状态保存失败；不能保证刷新后恢复，请检查数据库。',status='failed')
+            finally:
+                self.asr_metrics['unsent_pcm_bytes']=max(0,self.outstanding_bytes()-self.asr_metrics.get('uncertain_delivery_pcm_bytes',0))
+                while not self.queue.empty():self.queue.get_nowait()
+                self.queued_bytes=0;self.queued_frames=0;self.archive_queue.clear();self.archive_bytes=0
+                self.buffers_released=True;captures.discard(self)
 
 
     async def report_health(self):
@@ -795,16 +893,25 @@ class LiveCapture:
                 await self.transient('capture.health',status='recording',diagnostics=self.diagnostics())
 
     async def periodic_summary(self):
+        reported=False
         while True:
             await asyncio.sleep(settings.summary_interval_seconds)
-            if not self.ready:continue
+            if not self.ready or self.pending_processing_tasks>=settings.processing_backlog_degraded:continue
             def summarize():
                 with SessionLocal() as db:
                     row=db.get(Session,self.session_id)
                     if not row or not latest_segments(db,row.id):return
                     enqueue(db,row.user_id,'summarize',f'summary:{self.stream_id}:{int((time.monotonic()-self.started)//settings.summary_interval_seconds)}',{'session_id':row.id,'user_id':row.user_id},session_id=row.id)
                     db.commit()
-            await self.write_database(summarize)
+            try:
+                await self.write_database(summarize)
+                reported=False
+            except Exception as exc:
+                # Ordinary summary scheduling is not an audio failure. Retry
+                # scheduling only on the next normal interval (no paid call).
+                if not reported:
+                    logger.warning('summary_schedule_failed session_id=%s stream_id=%s exception_type=%s',self.session_id,self.stream_id,type(exc).__name__)
+                    reported=True
 
 
 @router.websocket('/ws/sessions/{session_id}')
@@ -863,8 +970,15 @@ async def websocket_session(ws:WebSocket,session_id:str,after_seq:int=0):
                 try:body=json.loads(message['text'])
                 except ValueError:continue
                 if body.get('type')=='start':await capture.start(str(body.get('request_id',''))[:100])
-                elif body.get('type')=='stop':await capture.stop()
-                elif body.get('type')=='capture.gap':await capture.gap(body.get('reason','采集中断'),body.get('duration_ms'))
+                elif body.get('type')=='stop':
+                    if body.get('user_initiated') and not capture.stopping:
+                        await capture.gap('用户主动停止录音',None,kind='user_paused',reason_code='user_stop',incident_id=f'{capture.request_id or capture.stream_id}:pause')
+                    await capture.stop()
+                elif body.get('type')=='capture.gap':
+                    await capture.gap(body.get('reason','采集中断'),body.get('duration_ms'),
+                        kind=body.get('gap_kind','asr_result_uncertain'),reason_code='browser_capture_notice',
+                        incident_id=body.get('incident_id'),capture_id=body.get('capture_id'),
+                        browser_diagnostics=body.get('browser_diagnostics') if isinstance(body.get('browser_diagnostics'),dict) else None)
                 elif body.get('type')=='ping':await capture.transient('connection.pong',queue_size=capture.queued_frames)
     except (WebSocketDisconnect,RuntimeError):pass
     except asyncio.CancelledError:

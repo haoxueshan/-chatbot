@@ -322,7 +322,9 @@ async def test_slow_asr_preparation_has_no_audio_queue_or_capture_time(factory,m
     async def delayed(self,audio,**kwargs):
         await release.wait()
         await kwargs['on_ready']();ready.set()
-        async for frame in audio:received.append(frame)
+        async for frame in audio:
+            received.append(frame)
+            kwargs["metrics"]["sent_audio_ms"]=kwargs["metrics"].get("sent_audio_ms",0)+len(frame)/32
         if False:yield {}
     monkeypatch.setattr(AliyunProvider,'stream_asr',delayed)
     class Socket:
@@ -383,7 +385,9 @@ async def test_long_pause_preserves_evidence_offsets_without_spending_capture_li
     received=[]
     async def provider(self,audio,**kwargs):
         await kwargs['on_ready']()
-        async for frame in audio:received.append(frame)
+        async for frame in audio:
+            received.append(frame)
+            kwargs['metrics']['sent_audio_ms']=kwargs['metrics'].get('sent_audio_ms',0)+len(frame)/32
         if False:yield {}
     monkeypatch.setattr(AliyunProvider,'stream_asr',provider)
     class Socket:
@@ -414,6 +418,7 @@ async def test_packet_burst_does_not_starve_healthy_upstream_sender(factory,monk
         await kwargs['on_ready']()
         async for frame in audio:
             sent.append(frame)
+            kwargs["metrics"]["sent_audio_ms"]=kwargs["metrics"].get("sent_audio_ms",0)+len(frame)/32
             await asyncio.sleep(0)
         if False:yield {}
     monkeypatch.setattr(AliyunProvider,'stream_asr',provider)
@@ -564,6 +569,11 @@ async def test_capture_health_reports_actual_audio_and_does_not_store_content(fa
         metrics=health.pop('preview_metrics')
         assert metrics['translation_preview_requests']==0 and metrics['asr_partial_events']==0
         assert all(isinstance(v,(int,float)) for v in metrics.values())
+        assert health.pop('capture_state')=='CAPTURING'
+        assert health.pop('asr_state')=='STREAMING'
+        assert health.pop('buffer_state')=='NORMAL'
+        assert health.pop('processing_state')=='NORMAL'
+        assert health.pop('first_failure_code') is None
         assert all(v is None or isinstance(v,(int,float)) for v in health.values())
         capture.last_audio_at=None
         assert capture.diagnostics()['last_audio_age_ms'] is None

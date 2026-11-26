@@ -158,7 +158,7 @@ async def test_audio_save_failure_still_finishes_session_and_preserves_text(fact
         yield {'sentence_id':'1','text':'보존되는 자막','start_ms':0,'end_ms':20,'final':True}
     monkeypatch.setattr(AliyunProvider,'stream_asr',provider)
     def broken(*args):raise OSError('storage full')
-    monkeypatch.setattr(LocalStorage,'put',broken)
+    monkeypatch.setattr(LocalStorage,'put_file',broken)
     with factory() as db:
         row=seed(db,mode='real');row.retain_audio=True;db.commit()
     capture=LiveCapture(AsyncMock(),'lesson','alice')
@@ -170,6 +170,7 @@ async def test_audio_save_failure_still_finishes_session_and_preserves_text(fact
         assert db.query(AudioAsset).one().status=='failed'
         assert db.query(Event).filter_by(type='processing.failed').one().payload['code']=='audio_storage_failed'
         assert capture.audio_path.exists()  # Retained privately until deletion/expiry for recovery.
+        assert capture.archived_pcm_bytes==0
 
 
 @pytest.mark.asyncio

@@ -93,7 +93,8 @@ def snapshot(row,user=None):
     if data['language_hints'] is None and user is not None:
         data['language_hints']=asr_language_hints((user.settings or {}).get('asr_language_mode','auto')) or []
     data['runtime']={key:getattr(settings,key) for key in ('asr_ws_url','dashscope_workspace_id','dashscope_region',
-        'model_timeout_seconds','asr_event_timeout_seconds','asr_finish_timeout_seconds','asr_send_timeout_seconds')}
+        'model_timeout_seconds','asr_event_timeout_seconds','asr_finish_timeout_seconds','asr_send_timeout_seconds',
+        'aliyun_asr_batch_enabled','aliyun_asr_batch_ms','aliyun_asr_batch_max_wait_ms')}
     return data
 
 

@@ -161,6 +161,14 @@ export interface BridgeEvent extends Partial<Segment> {
   asr_acoustic_profile?: "far" | "near";
   asr_enhancement?: { hotword_count: number; weight: number; context_chars: number };
   diagnostics?: import("./captureHealth").CaptureHealth;
+  audio_runtime?: import("./audioRuntime").AudioRuntime;
+  incident_id?: string;
+  gap_kind?: "audio_missing" | "audio_delayed" | "asr_interrupted" | "asr_result_uncertain" | "translation_delayed" | "user_paused" | "connection_recovering" | "connection_recovered" | "storage_failed";
+  reason_code?: string;
+  duration_ms?: number | null;
+  missing_audio_ms?: number | null;
+  uncertain_audio_ms?: number | null;
+  capture_id?: string;
   data?: Record<string, unknown>;
 }
 export interface Document {
@@ -202,6 +210,7 @@ export interface ChatReply {
   mode: Mode;
 }
 export interface Preferences {
+  audio_runtime?: import("./audioRuntime").AudioRuntime;
   default_asr_profile_id?: string | null;
   aliyun_services_error?: { code:string;message:string } | null;
   asr_hotword_weight?: 2 | 3 | 4;

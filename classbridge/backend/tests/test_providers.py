@@ -85,11 +85,12 @@ async def test_finish_deadline_also_bounds_stalled_finish_send(monkeypatch,serve
 
 
 @pytest.mark.asyncio
-async def test_65_minute_pcm_clock_heartbeats_order_and_cleanup(monkeypatch):
-    """195,000 real-format frames, accelerated sample clock; no network or DB."""
+@pytest.mark.parametrize("minutes,batch_ms",[(5,20),(30,40),(65,60),(105,100)])
+async def test_long_pcm_clock_heartbeats_order_and_cleanup(monkeypatch,minutes,batch_ms):
+    """Up to 315,000 actual PCM frames, accelerated clock; no network or DB."""
     import app.ws.live as live
     from unittest.mock import AsyncMock
-    clock=[100.];task='e'*32;total=65*60*50;count=0;closed=[]
+    clock=[100.];task='e'*32;total=minutes*60*50;count=0;closed=[]
     started_tasks=set(asyncio.all_tasks());peak_tasks=0
     monotonic=SimpleNamespace(monotonic=lambda:clock[0])
     monkeypatch.setattr(module,'time',monotonic);monkeypatch.setattr(live,'time',monotonic)
@@ -102,11 +103,13 @@ async def test_65_minute_pcm_clock_heartbeats_order_and_cleanup(monkeypatch):
         async def send(self,data):
             nonlocal count,peak_tasks
             if isinstance(data,bytes):
-                assert data==(count%32768).to_bytes(2,'little')*320
-                count+=1;clock[0]=100+count*.02
-                if count%250==0:
-                    await messages.put(event('result-generated',{'heartbeat':True}))
-                if count%50==0:sent_batch.set()
+                assert len(data)%640==0
+                for offset in range(0,len(data),640):
+                    assert data[offset:offset+640]==(count%32768).to_bytes(2,'little')*320
+                    count+=1;clock[0]=100+count*.02
+                    if count%250==0:
+                        await messages.put(event('result-generated',{'heartbeat':True}))
+                if count%30==0:sent_batch.set()
                 if count%3000==0:peak_tasks=max(peak_tasks,len(asyncio.all_tasks()-started_tasks))
             elif json.loads(data)['header']['action']=='run-task':
                 await messages.put(event('task-started'))
@@ -125,25 +128,25 @@ async def test_65_minute_pcm_clock_heartbeats_order_and_cleanup(monkeypatch):
     other=live.LiveCapture(AsyncMock(),'second-synthetic','mock-user')
     finals=[]
     async def consume():
-        provider=AliyunProvider(config(asr_event_timeout_seconds=30))
+        provider=AliyunProvider(config(asr_event_timeout_seconds=30,aliyun_asr_batch_enabled=True,aliyun_asr_batch_ms=batch_ms,aliyun_asr_batch_max_wait_ms=100))
         async for item in provider.stream_asr(capture.audio_iter(),metrics=capture.asr_metrics):finals.append(item)
     capture.task=asyncio.create_task(consume())
     try:
-        for base in range(0,total,50):
+        for base in range(0,total,30):
             sent_batch.clear()
-            for index in range(base,base+50):await capture.audio((index%32768).to_bytes(2,'little')*320)
+            for index in range(base,base+30):await capture.audio((index%32768).to_bytes(2,'little')*320)
             await asyncio.wait_for(sent_batch.wait(),2)
         capture.signal_stop();await asyncio.wait_for(capture.task,2)
     finally:
         capture.task.cancel();await asyncio.gather(capture.task,return_exceptions=True)
-    assert count==total and capture.received_audio_ms==capture.asr_metrics['sent_audio_ms']==3900000
+    assert count==total and capture.received_audio_ms==capture.asr_metrics['sent_audio_ms']==minutes*60000
     assert capture.queued_bytes==capture.queued_frames==0 and 0<capture.audio_queue_peak<=32000
-    assert capture.asr_metrics['heartbeat_events']==780 and capture.asr_metrics['transcript_events']==1
-    assert len(finals)==1 and finals[0]['final'] and finals[0]['end_ms']==3900000
+    assert capture.asr_metrics['heartbeat_events']==minutes*12 and capture.asr_metrics['transcript_events']==1
+    assert len(finals)==1 and finals[0]['final'] and finals[0]['end_ms']==minutes*60000
     assert not capture.failure_reported and closed==[True]
     assert other.queue.empty() and not other.asr_metrics and other.received_audio_ms==0
-    assert peak_tasks<=8 and set(asyncio.all_tasks())==started_tasks
-    print(json.dumps({'synthetic_minutes':65,'frames':count,'queue_peak_ms':capture.audio_queue_peak/32,
+    assert peak_tasks<=10 and set(asyncio.all_tasks())==started_tasks
+    print(json.dumps({'synthetic_minutes':minutes,'batch_ms':batch_ms,'frames':count,'queue_peak_ms':capture.audio_queue_peak/32,
         'peak_internal_tasks':peak_tasks,'remaining_tasks':len(asyncio.all_tasks()-started_tasks),
         'finals':len(finals),'gaps':0}))
 
@@ -507,7 +510,7 @@ async def test_upstream_close_has_specific_safe_diagnostics(monkeypatch):
     with pytest.raises(ProviderError) as err:
         async for _ in AliyunProvider(config()).stream_asr(audio()):pass
     assert err.value.code=='upstream_disconnected'
-    assert err.value.diagnostics=={'upstream_close_code':1000}
+    assert err.value.diagnostics=={'upstream_close_code':1000,'provider_task_id':task,'exception_type':'ConnectionClosedOK'}
     assert 'unsafe' not in err.value.message
 
 
@@ -528,6 +531,26 @@ async def test_blocked_upstream_send_has_bounded_timeout(monkeypatch):
         async def __aexit__(self,*args):pass
     monkeypatch.setattr(module,'connect',lambda *args,**kwargs:Context())
     async def audio():yield bytes(640)
-    async def run():return [e async for e in AliyunProvider(config(asr_send_timeout_seconds=.02)).stream_asr(audio())]
+    metrics={};before=set(asyncio.all_tasks())
+    async def run():return [e async for e in AliyunProvider(config(asr_send_timeout_seconds=.02)).stream_asr(audio(),metrics=metrics)]
     with pytest.raises(ProviderError) as err:await asyncio.wait_for(run(),.2)
     assert err.value.code=='upstream_send_timeout'
+    assert err.value.diagnostics['timeout_phase']=='audio_send'
+    assert metrics['uncertain_delivery_pcm_bytes']==640 and metrics['sent_audio_ms']==0
+    assert metrics['upstream_inflight_pcm_bytes']==0 and 'send_started_monotonic' not in metrics
+    assert set(asyncio.all_tasks())==before
+
+
+@pytest.mark.asyncio
+async def test_invalid_handshake_reports_only_safe_metadata(monkeypatch):
+    from websockets.exceptions import InvalidMessage
+    class Context:
+        async def __aenter__(self):raise InvalidMessage('private proxy body must not appear')
+        async def __aexit__(self,*args):pass
+    monkeypatch.setattr(module,'connect',lambda *args,**kwargs:Context())
+    async def audio():yield bytes(640)
+    with pytest.raises(ProviderError) as err:
+        async for _ in AliyunProvider(config()).stream_asr(audio()):pass
+    assert err.value.code=='upstream_handshake_invalid'
+    assert err.value.diagnostics['timeout_phase']=='handshake'
+    assert 'private' not in str(err.value.diagnostics)+err.value.message

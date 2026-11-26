@@ -185,6 +185,28 @@ if (phase === 'after') {
   assert.equal(await page.evaluate(()=>window.auditSockets.length),socketCount);
   assert.equal(await page.evaluate(()=>window.auditSockets.at(-1).sent.filter(x=>JSON.parse(x).type==='start').length),1);
   assert.equal(await page.evaluate(()=>window.auditSockets.at(-1).sent.filter(x=>JSON.parse(x).type==='stop').length),0);
+  if(process.env.AUDIT_AUDIO_DIAGNOSTICS==='1'){
+    // Exercise the real rendered UI with Mock health/events, never a model or microphone.
+    await page.evaluate(id=>{
+      const ws=window.auditSockets.at(-1),request=JSON.parse(ws.sent.find(x=>JSON.parse(x).type==='start')).request_id;
+      ws.event({type:'session.state',session_id:id,stream_id:'fixture-stream',request_id:request,state:'recording',ready:true,event_seq:1});
+      ws.event({type:'capture.health',session_id:id,stream_id:'fixture-stream',diagnostics:{
+        received_audio_ms:5000,sent_audio_ms:1500,queued_audio_ms:3500,input_dbfs:-25,
+        buffer_state:'DEGRADED',capture_state:'CAPTURING',asr_state:'DEGRADED',current_send_wait_ms:3000,
+        pending_processing_tasks:200,processing_state:'DEGRADED',asr_result_queue_size:3,event_loop_lag_ms:5}});
+      for(const [index,kind] of ['audio_delayed','asr_result_uncertain'].entries())ws.event({
+        type:'capture.gap',session_id:id,stream_id:'fixture-stream',event_id:`incident-${index}`,event_seq:2+index,
+        incident_id:'mock-capture:failure',gap_kind:kind,start_ms:90000,duration_ms:null,message:kind==='audio_delayed'?'Mock 音频延迟':'Mock 识别结果未确认'});
+    },lesson.id);
+    await page.locator('.capture-health').waitFor();
+    await page.locator('.capture-health > summary').click();
+    assert.match(await page.locator('.capture-health').innerText(),/3000 毫秒/);
+    assert.equal(await page.getByText('Mock 音频延迟；Mock 识别结果未确认',{exact:false}).count(),1);
+    await checkLayout('audio diagnostics','.capture-health');
+    await page.screenshot({path:resolve(output,'mobile-audio-diagnostics.png')});
+    assert.equal(await page.getByRole('button',{name:'停止模拟',exact:true}).isVisible(),true);
+    await page.locator('.capture-health > summary').click();
+  }
   await page.getByRole('button',{name:'停止模拟',exact:true}).click();
   // Short viewport models available layout space only; this is NOT a native Safari keyboard test.
   await page.goto(`${origin}/#session/${lesson.id}`);

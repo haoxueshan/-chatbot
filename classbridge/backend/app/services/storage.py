@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 from typing import Protocol
+import shutil
 from urllib.parse import quote
 
 from itsdangerous import URLSafeTimedSerializer
@@ -12,6 +13,7 @@ from app.config import settings
 
 class Storage(Protocol):
     def put(self, key: str, data: bytes) -> None: ...
+    def put_file(self, key: str, source: Path) -> None: ...
     def read(self, key: str) -> bytes: ...
     def delete(self, key: str) -> None: ...
     def signed_url(self, key: str, ttl: int = 900) -> str: ...
@@ -56,6 +58,13 @@ class LocalStorage:
     def read(self, key):
         return self.path(key).read_bytes()
 
+    def put_file(self, key, source):
+        path=self.path(key);path.parent.mkdir(parents=True,exist_ok=True)
+        temporary=path.with_suffix(path.suffix+'.tmp')
+        with Path(source).open('rb') as reader,temporary.open('wb') as writer:
+            shutil.copyfileobj(reader,writer,length=65536)
+        temporary.replace(path)
+
     def delete(self, key):
         self.path(key).unlink(missing_ok=True)
 
@@ -75,6 +84,9 @@ class S3Storage:
 
     def put(self, key, data):
         self.client.put_object(Bucket=self.bucket, Key=validate_key(key), Body=data)
+
+    def put_file(self, key, source):
+        with Path(source).open('rb') as reader:self.put(key,reader)
 
     def read(self, key):
         return self.client.get_object(Bucket=self.bucket, Key=validate_key(key))["Body"].read()
@@ -99,6 +111,9 @@ class OSSStorage:
 
     def put(self, key, data):
         self.bucket.put_object(validate_key(key), data)
+
+    def put_file(self, key, source):
+        with Path(source).open('rb') as reader:self.put(key,reader)
 
     def read(self, key):
         return self.bucket.get_object(validate_key(key)).read()
