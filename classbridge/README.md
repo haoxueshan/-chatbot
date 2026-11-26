@@ -1,5 +1,7 @@
 # ClassBridge · 语音理解工作台
 
+2026-11-26 音频稳定性：千问100ms聚合、可配置分级缓冲、后台任务隔离及故障分类已完成 Mock 验证；浏览器仍20ms采音，Soniox协议不变。自动恢复未实现，开启时拒绝启动。配置、性能代价、测试、部署和回退见 [音频可靠性交付记录](docs/ASR_PIPELINE_RELIABILITY.md)。本轮没有重启现有服务或调用真实模型。
+
 面向韩英交替课堂、会议和访谈的私人语音理解应用。React / TypeScript / Vite 前端，FastAPI 后端，生产使用 PostgreSQL + pgvector、Redis / Celery、Nginx。项目独立放在 `classbridge/`，不覆盖其他网站。
 
 完整目录、关键文件职责、数据库记录和业务调用链见 [项目结构与模块职责](docs/PROJECT_STRUCTURE.md)。

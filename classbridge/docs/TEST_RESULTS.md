@@ -1,5 +1,28 @@
 # 实际测试与验收记录
 
+## 2026-11-26：音频稳定性 Phase A / B
+
+基线 `2bafeca170d6a0386391ddbef12c0940b7f1d525`；使用现有 Python 3.13 虚拟环境。全部 Mock；密钥环境变量为空，临时SQLite测试库，不调用真实API。
+
+| 实际命令/场景 | 结果 |
+|---|---|
+| `INCREMENTAL_TRANSLATION_ENABLED=false python -m pytest -q` | 478 passed，1 skipped；120.29秒 |
+| `INCREMENTAL_TRANSLATION_ENABLED=true python -m pytest -q` | 478 passed，1 skipped；123.60秒 |
+| 最后故障诊断字段定向回归 `pytest -q tests/test_capture_gap_incidents.py` | 3 passed；1.44秒 |
+| `npm test` | 116 passed，0 failed |
+| `npm run typecheck` | 通过 |
+| `npm run build` | 通过，Vite 6.4.5；4.65秒 |
+| Chromium `tests/browser/responsive.mjs`，`AUDIT_AUDIO_DIAGNOSTICS=1` | 11视口、128项检查通过；无前端运行错误 |
+| `python tests/benchmark_asr_reliability.py` | 20/40/60/100ms对照通过，PCM SHA256相同 |
+
+唯一跳过项为 `CLASSBRIDGE_TEST_POSTGRES_URL` 未配置的独立 PostgreSQL + pgvector 迁移测试。SQLite迁移/历史记录回归通过；不代表生产PostgreSQL/Celery容器验收。Windows测试设置 `PYTHONUTF8=1`，避免子进程UTF-8输出被GBK解码；未修改迁移业务代码。
+
+新增测试覆盖6种聚合尺寸、flush/取消/尾帧、有界队列与节点/内存保护、100～8000ms容量边界、后台积压降级、Worker线程隔离、首个错误、未知缺口与故障分组、存档失败/文件流发布、失效握手、发送超时、5/30/65/105分钟加速音频时序。原有Aliyun/Soniox、14语言、ASR/MT分离、Outbox、RAG权限/证据、历史恢复继续通过。
+
+对照：3000个20ms帧、1920000字节；基线3000条音频消息，本轮100ms模式600条；均60条Mock正式结果、无剩余子任务。本轮100ms聚合等待P95为80ms；本地无真实网络基准总执行时间346.498ms，高于基线237.924ms，不宣称CPU或真实字幕延迟改善。完整数据和局限见 [交付记录](ASR_PIPELINE_RELIABILITY.md) 与 [原始数值](ASR_PIPELINE_BENCHMARK.json)。
+
+浏览器截图与检查：[移动诊断截图](screenshots/asr-reliability/mobile-audio-diagnostics.png)、[检查明细](screenshots/asr-reliability/checks.json)、[布局测量](screenshots/asr-reliability/layout.json)。全部业务请求/录音连接为Mock；实体Safari、真实麦克风、VPN、课堂和云端账号未测试。Phase C自动恢复未实现，启用配置会被拒绝，不能以Mock宣称恢复成功。
+
 ## 2026-11-25：翻译调度与会话文件夹回归
 
 - 后端 `python -m pytest -q`：**428 passed，1 skipped**，80.15 秒。

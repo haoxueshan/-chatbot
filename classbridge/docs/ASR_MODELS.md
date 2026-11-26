@@ -1,5 +1,9 @@
 # 多 ASR 模型管理
 
+## 2026-11-26 传输更新
+
+Aliyun在每次录音快照中固定 `aliyun_asr_batch_enabled/ms/max_wait_ms`（默认true/100/100），ready事件同时提供安全audio_runtime。Soniox保留原PCM分帧和协议，仅增加发送/队列诊断。新Adapter须在ws.send成功后准确更新 `metrics['sent_audio_ms']`，该值只表示发送完成，不是云端确认。配置、费用边界与Mock结果见 [音频可靠性](ASR_PIPELINE_RELIABILITY.md)。不会中途切换供应商或自动创建新识别任务。
+
 基线 `5b27cecf1c9f14a99a17e4f2eea57934a5d4d487`；开发分支 `feat/asr-profile-management`。本次保留已有字幕版本、稳定译文预览、Outbox、RAG、音频采集和最终收尾。所有自动测试使用 Mock；没有自动请求付费 API。
 
 ## 使用

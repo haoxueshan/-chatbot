@@ -1,5 +1,11 @@
 # 实时录音中断排查
 
+## 2026-11-26：先区分积压、丢失和不确定
+
+新版本查看登录后的 `/api/settings` → `audio_runtime` 及录音ready快照。默认浏览器/服务器/WAV预算为8秒，服务器警告1.5秒、高水位3秒；旧前端仍可能在2秒停止，升级后需刷新。`current_send_wait_ms`描述当前卡住的发送，旧`send_wait_ms`只描述上一条；发送完成不等于模型已识别。
+
+同一incident的原始错误都保留，界面合并显示；unknown duration为null，暂停/识别中断不是已确认缺帧。收尾diagnostics区分rejected、unsent、uncertain_delivery和archived。后台200项会暂缓索引/摘要，5000项硬上限才停止。不要只增加超时或缓存掩盖网络故障，也不要启用未实现的自动恢复。配置与回退见 [音频可靠性](ASR_PIPELINE_RELIABILITY.md)。下文旧记录中的固定2秒/200项限制仅描述旧版本。
+
 ## 语音识别逻辑检查（2026-11-02）
 
 已修复迟到临时结果降级稳定字幕、重复识别事件重新创建版本/任务，以及旧任务停止/失败事件干扰新录音的问题；上游启动确认也增加task_id校验。检查记录与边界见 [ASR_LOGIC_REVIEW.md](ASR_LOGIC_REVIEW.md)。停止录音后重启PyCharm中的backend/main.py，再刷新iPad页面生效；无需迁移数据库或更换API Key。本次没有改800ms默认断句，20ms仍只是PCM传输帧长，不能据此认定韩语错字是“断句太快”。
