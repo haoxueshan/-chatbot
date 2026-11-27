@@ -14,6 +14,7 @@ router = APIRouter(prefix='/api/settings', tags=['Settings'])
 
 
 class Preferences(BaseModel):
+    ui_language: Literal['zh-CN', 'en', 'ko'] = 'zh-CN'
     theme: str = 'light'
     subtitle_size: int = Field(default=24, ge=18, le=44)
     show_original: bool = True
@@ -54,6 +55,8 @@ def translation_runtime_status():
 def read_settings(user: User = Depends(current_user), db: DBSession = Depends(get_db)):
     # Ignore retired/unknown JSON fields without validating old unrelated data.
     preferences={**Preferences().model_dump(), **{k:v for k,v in (user.settings or {}).items() if k in Preferences.model_fields}}
+    if preferences.get('ui_language') not in ('zh-CN', 'en', 'ko'):
+        preferences['ui_language'] = 'zh-CN'
     try:target_code(preferences['target_language'])
     except ValueError as exc:raise HTTPException(422,detail=str(exc))
     report=asr_vocabulary_report(preferences.get('terms',[]),preferences['asr_hotword_weight'])

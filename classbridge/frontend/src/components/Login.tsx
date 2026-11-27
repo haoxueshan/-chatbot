@@ -10,7 +10,10 @@ import {
 } from "lucide-react";
 import { post } from "../lib/api";
 import type { User } from "../lib/types";
+import { LanguageSwitcher } from "./LanguageSwitcher";
+import { useI18n } from "../i18n/I18nProvider";
 export function Login({ done }: { done: (u: User) => void }) {
+  const { t } = useI18n();
   const [username, setUsername] = useState("admin"),
     [password, setPassword] = useState(""),
     [error, setError] = useState(""),
@@ -22,40 +25,41 @@ export function Login({ done }: { done: (u: User) => void }) {
     try {
       done(await post<User>("/auth/login", { username, password }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "登录失败");
+      setError("failed");
     } finally {
       setBusy(false);
     }
   };
   return (
     <main className="login">
+      <div style={{ position: "absolute", right: 16, top: 16, zIndex: 2 }}><LanguageSwitcher /></div>
       <section className="login-story">
         <div className="brand light">
           <span className="brand-icon">
             <AudioLines />
           </span>
           <span>
-            ClassBridge<small>语音理解工作台</small>
+            ClassBridge<small>{t("auth.brand")}</small>
           </span>
         </div>
         <div className="login-main">
           <span className="eyebrow light">
             <span />
-            让理解，跨越语言
+            {t("auth.eyebrow")}
           </span>
           <h1>
-            专注此刻。
+            {t("auth.focus")}
             <br />
-            每一句，都听懂。
+            {t("auth.understand")}
           </h1>
           <p>
-            让韩语、英语课堂自然流入你的中文笔记。
+            {t("auth.intro")}
             <br />
-            听见原文，理解知识，带着证据继续探索。
+            {t("auth.explore")}
           </p>
           <div className="sample-caption">
             <div>
-              <span className="tag">产品示意 · 非实时字幕</span>
+              <span className="tag">{t("auth.sample")}</span>
               <Languages size={18} />
             </div>
             <p>Learning begins with asking good questions.</p>
@@ -65,31 +69,31 @@ export function Login({ done }: { done: (u: User) => void }) {
           <div className="feature-row">
             <span>
               <AudioLines size={17} />
-              双语字幕
+              {t("auth.captions")}
             </span>
             <span>
               <BookOpen size={17} />
-              知识沉淀
+              {t("auth.knowledge")}
             </span>
             <span>
               <Sparkles size={17} />
-              循证问答
+              {t("auth.evidence")}
             </span>
           </div>
         </div>
-        <span className="login-foot">从声音到理解，从课堂到知识。</span>
+        <span className="login-foot">{t("auth.footer")}</span>
       </section>
       <section className="login-form">
         <div className="login-box">
           <div className="lock-mark">
             <LockKeyhole size={25} />
           </div>
-          <span className="eyebrow">你的私人学习空间</span>
-          <h2>欢迎回来</h2>
-          <p className="muted">登录 ClassBridge，继续你的理解之旅。</p>
+          <span className="eyebrow">{t("auth.private")}</span>
+          <h2>{t("auth.welcome")}</h2>
+          <p className="muted">{t("auth.continue")}</p>
           <form onSubmit={submit}>
             <label>
-              用户名
+              {t("auth.username")}
               <input
                 autoComplete="username"
                 required
@@ -98,7 +102,7 @@ export function Login({ done }: { done: (u: User) => void }) {
               />
             </label>
             <label>
-              密码
+              {t("auth.password")}
               <input
                 autoComplete="current-password"
                 required
@@ -109,22 +113,22 @@ export function Login({ done }: { done: (u: User) => void }) {
             </label>
             {error && (
               <div role="alert" className="error-box">
-                {error}
+                {t("auth.failed")}
               </div>
             )}
             <button className="primary full" disabled={busy}>
-              {busy ? "正在登录…" : "进入工作台"}
+              {busy ? t("auth.busy") : t("auth.submit")}
               <ArrowRight size={17} />
             </button>
           </form>
           <div className="login-note">
             <ShieldCheck size={17} />
             <p>
-              仅限已创建的私人账户。管理员需在服务器初始化；公开注册已关闭。
+              {t("auth.registration")}
             </p>
           </div>
           <p className="tiny muted">
-            首次体验？登录后创建「模拟演示」会话即可，演示不调用付费 API。
+            {t("auth.demo")}
           </p>
         </div>
       </section>

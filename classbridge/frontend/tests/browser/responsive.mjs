@@ -108,6 +108,7 @@ if (phase === 'after') {
     const result = await page.locator(selector).evaluate(el => {
       const rect = el.getBoundingClientRect();
       return { width:innerWidth, height:innerHeight, overflow:el.scrollWidth>el.clientWidth+1,
+        overflowing: [...el.querySelectorAll('*')].filter(child => child.getBoundingClientRect().right > rect.right + 1).slice(0, 12).map(child => ({ tag: child.tagName, class: child.className, text: child.textContent.slice(0, 60) })),
         inViewport: rect.left>=-1 && rect.right<=innerWidth+1 && rect.top>=-1 && rect.bottom<=innerHeight+1 };
     });
     assert.equal(result.overflow,false,`${label}: horizontal overflow ${JSON.stringify(result)}`);
@@ -253,6 +254,27 @@ if (phase === 'after') {
   await page.keyboard.press('Escape');
   await page.getByRole('dialog').waitFor({state:'hidden'});
   await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='打开导航');
+  if (process.env.AUDIT_I18N === '1') {
+    for (const language of ['zh-CN', 'en', 'ko']) {
+      preferences.ui_language = language;
+      for (const theme of ['light', 'dark']) {
+        preferences.theme = theme;
+        for (const [width, height] of [[320,568],[375,667],[390,844],[768,1024],[1024,768],[1280,800],[1440,900],[1920,1080]]) {
+          await page.setViewportSize({width,height});
+          for (const route of ['home','settings','library',`session/${lesson.id}`]) {
+            await page.goto(`${origin}/#${route}`);
+            await page.reload();
+            await page.waitForFunction(lang => document.documentElement.lang === lang, language);
+            const selector = route.startsWith('session/') ? '.subtitle-panel' : '.page-scroll';
+            await page.locator(selector).waitFor();
+            await checkLayout(`${language}/${theme}/${route}`, selector);
+            assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth > innerWidth), false);
+            if (width === 1440) await page.screenshot({path:resolve(output,`${language}-${theme}-${route.split('/')[0]}.png`)});
+          }
+        }
+      }
+    }
+  }
   await context.route('**/api/auth/me', route=>route.fulfill({status:401,contentType:'application/json',body:'{"detail":"Mock login required"}'}));
   for(const [width,height] of sizes) {
     await page.setViewportSize({width,height});

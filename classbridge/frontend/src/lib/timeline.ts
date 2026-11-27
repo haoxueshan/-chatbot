@@ -1,5 +1,21 @@
 import type { BridgeEvent, Segment } from "./types";
 
+export function incidentCode(events: BridgeEvent[]) {
+  for (const kind of ["audio_missing", "storage_failed", "asr_result_uncertain", "asr_interrupted"] as const) {
+    if (events.some(event => event.gap_kind === kind)) return kind;
+  }
+  const kind = events[0]?.gap_kind;
+  switch (kind) {
+    case "user_paused":
+    case "audio_delayed":
+    case "translation_delayed":
+    case "connection_recovered":
+    case "connection_recovering":
+      return kind;
+    default: return "unknown";
+  }
+}
+
 export type TimelineEntry =
   | { kind: "segment"; time: number; key: string; segment: Segment }
   | { kind: "gap"; time: number; key: string; gap: BridgeEvent; related: BridgeEvent[] };

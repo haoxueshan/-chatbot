@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AudioCapture, audioBufferFits, type AudioInputOptions, type AudioQuality, type AppliedAudioSettings } from "./audio";
-import { connectLive } from "./liveConnection";
+import { connectLive, type ConnectionState } from "./liveConnection";
 import { isCurrentCaptureEvent } from "./captureEvents";
 import { applyEvent, initialTranscript, orderedSegments } from "./events";
 import type { BridgeEvent, Session } from "./types";
@@ -18,7 +18,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     initialTranscript(session.id, session.segments, session.unconfirmed_segments, session.target_language),
   );
   const [translationTarget, setTranslationTarget] = useState<Session["target_language"]>();
-  const [connection, setConnection] = useState("连接中");
+  const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [active, setActive] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [settling, setSettling] = useState(false);
@@ -128,7 +128,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
       },
       onState: (state) => {
         setConnection(state);
-        if (state === "已连接" && lastGap.current && ws.current) {
+        if (state === "connected" && lastGap.current && ws.current) {
           ws.current.send(
             JSON.stringify({
               type: "capture.gap",

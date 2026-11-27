@@ -22,10 +22,12 @@ import {
   WifiOff,
 } from "lucide-react";
 import type { Page, Session } from "../lib/types";
-import { formatDate } from "../lib/api";
+import { formatDate, formatNumber } from "../i18n";
+import { useI18n } from "../i18n/I18nProvider";
 import { Button } from "./ui/button";
 import { Dialog } from "./ui/dialog";
 import { cn } from "../lib/utils";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 import { FolderNavigation, type FolderNavigationProps } from "./SessionFolders";
 
 export interface SidebarProps {
@@ -52,6 +54,7 @@ export function Sidebar({
   collapsed,
   close,
 }: SidebarProps) {
+  const { t, language } = useI18n();
   const go = (action: () => void) => {
     action();
     close?.();
@@ -59,13 +62,13 @@ export function Sidebar({
   return (
     <aside
       className={cn("sidebar", collapsed && "sidebar-collapsed")}
-      aria-label="工作空间导航"
+      aria-label={t("navigation.workspace")}
     >
       <div className="sidebar-brand-row">
         <button
           className="brand"
-          aria-label="ClassBridge 工作台"
-          title="ClassBridge 工作台"
+          aria-label={t("navigation.brand")}
+          title={t("navigation.brand")}
           onClick={() => go(() => navigate("home"))}
           disabled={disabled}
         >
@@ -73,14 +76,14 @@ export function Sidebar({
             <AudioLines size={22} />
           </span>
           <span className="brand-name">
-            ClassBridge<small>语音理解工作台</small>
+            ClassBridge<small>{t("auth.brand")}</small>
           </span>
         </button>
         {close && (
           <Button
             variant="ghost"
             size="icon"
-            aria-label="关闭导航"
+            aria-label={t("navigation.close")}
             onClick={close}
           >
             <X size={18} />
@@ -91,17 +94,17 @@ export function Sidebar({
         className="new-session"
         onClick={() => go(create)}
         disabled={disabled}
-        aria-label="新建会话"
-        title="新建会话"
+        aria-label={t("sessions.new")}
+        title={t("sessions.new")}
       >
         <Plus size={18} />
-        <span>新建会话</span>
+        <span>{t("sessions.new")}</span>
       </Button>
-      <nav aria-label="主导航">
+      <nav aria-label={t("navigation.main")}>
         {[
-          { id: "home" as Page, label: "工作台", icon: Home },
-          { id: "library" as Page, label: "资料库", icon: BookOpen },
-          { id: "settings" as Page, label: "偏好设置", icon: Settings },
+          { id: "home" as Page, label: t("navigation.home"), icon: Home },
+          { id: "library" as Page, label: t("navigation.library"), icon: BookOpen },
+          { id: "settings" as Page, label: t("navigation.settings"), icon: Settings },
         ].map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -123,7 +126,7 @@ export function Sidebar({
         select={id => go(() => folderNavigation.select(id))}
         manage={() => go(folderNavigation.manage)} />}
       <div className="sidebar-label">
-        最近会话<span>{sessions.length}</span>
+        {t("sessions.recent")}<span>{formatNumber(language, sessions.length)}</span>
       </div>
       <div className="recent-nav">
         {sessions.slice(0, 10).map((s) => (
@@ -144,19 +147,19 @@ export function Sidebar({
             <span>
               {s.title}
               <small>
-                {formatDate(s.created_at)}
-                {s.mode === "demo" ? " · 模拟" : ""}
+                {formatDate(language, s.created_at)}
+                {s.mode === "demo" ? t("sessions.demoSuffix") : ""}
               </small>
             </span>
           </button>
         ))}
-        {!sessions.length && <p className="muted tiny">暂无已保存的会话</p>}
+        {!sessions.length && <p className="muted tiny">{t("sessions.empty")}</p>}
       </div>
       </div>
       <div className="private-card">
         <ShieldCheck size={18} />
         <div>
-          私人工作空间<small>音频与资料默认私有</small>
+          {t("navigation.privateWorkspace")}<small>{t("navigation.privacy")}</small>
         </div>
       </div>
       <div className="sidebar-footer">
@@ -172,6 +175,7 @@ export function ResponsiveSidebar({
   setOpen,
   ...props
 }: SidebarProps & { open: boolean; setOpen: (open: boolean) => void }) {
+  const { t } = useI18n();
   const [compact, setCompact] = useState(
     () =>
       typeof window !== "undefined" &&
@@ -190,7 +194,7 @@ export function ResponsiveSidebar({
   if (!compact) return <Sidebar {...props} />;
   return open ? (
     <Dialog
-      title="工作空间导航"
+      title={t("navigation.workspace")}
       close={() => setOpen(false)}
       className="navigation-drawer"
     >
@@ -224,6 +228,7 @@ export function Titlebar({
   collapsed: boolean;
   menuOpen: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <header className="topbar">
       <div className="topbar-leading">
@@ -232,7 +237,7 @@ export function Titlebar({
           size="icon"
           className="mobile-menu-toggle"
           data-dialog-fallback-focus
-          aria-label="打开导航"
+          aria-label={t("navigation.open")}
           aria-expanded={menuOpen}
           onClick={menu}
         >
@@ -242,7 +247,7 @@ export function Titlebar({
           variant="ghost"
           size="icon"
           className="desktop-menu-toggle"
-          aria-label={collapsed ? "展开侧边栏" : "折叠侧边栏"}
+          aria-label={t(collapsed ? "navigation.expand" : "navigation.collapse")}
           aria-expanded={!collapsed}
           onClick={collapse}
         >
@@ -253,23 +258,24 @@ export function Titlebar({
           )}
         </Button>
         <div className="breadcrumb">
-          <span>私人空间</span>
+          <span>{t("navigation.private")}</span>
           <ChevronRight size={14} />
           <strong title={title}>{title}</strong>
         </div>
       </div>
       <div className="topbar-actions">
+        <LanguageSwitcher />
         <span
           className={cn("network-state", !online && "network-offline")}
-          title="浏览器网络状态，不代表识别服务已连接"
+          title={t("navigation.networkHint")}
         >
           {online ? <Wifi size={15} /> : <WifiOff size={15} />}
-          <span>{online ? "网络可用" : "网络离线"}</span>
+          <span>{t(online ? "navigation.online" : "navigation.offline")}</span>
         </span>
         <Button
           variant="ghost"
           size="icon"
-          aria-label={dark ? "切换浅色主题" : "切换深色主题"}
+          aria-label={t(dark ? "navigation.light" : "navigation.dark")}
           onClick={toggle}
         >
           {dark ? <Sun size={18} /> : <Moon size={18} />}
@@ -280,8 +286,8 @@ export function Titlebar({
         <Button
           variant="ghost"
           size="icon"
-          title="退出登录"
-          aria-label="退出登录"
+          title={t("navigation.logout")}
+          aria-label={t("navigation.logout")}
           onClick={logout}
           disabled={disabled}
         >
@@ -298,12 +304,13 @@ export function Toast({
   message: string;
   close: () => void;
 }) {
+  const { t } = useI18n();
   if (!message) return null;
   return (
     <div className="toast toast-enter" role="status">
       <AlertTriangle size={18} />
       <span>{message}</span>
-      <Button variant="ghost" size="icon" aria-label="关闭提示" onClick={close}>
+      <Button variant="ghost" size="icon" aria-label={t("common.dismiss")} onClick={close}>
         <X size={16} />
       </Button>
     </div>

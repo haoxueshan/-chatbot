@@ -1,5 +1,44 @@
 # 实际测试与验收记录
 
+## 2026-11-27：P3.3 前端国际化
+
+实际 HEAD：`97e016e5da800d6517191b629c7c47cf35fb7af6`，改动保留在工作区，未提交或推送。
+
+| 实际命令/场景 | 结果 |
+|---|---|
+| 后端 UI 语言定向测试 | 12 passed |
+| 后端全量（默认配置） | 490 passed，1 skipped；139.04秒 |
+| `INCREMENTAL_TRANSLATION_ENABLED=false` 后端全量 | 490 passed，1 skipped；130.64秒 |
+| `INCREMENTAL_TRANSLATION_ENABLED=true` 后端全量 | 490 passed，1 skipped；137.23秒 |
+| `npm test`（最终） | 123 passed，0 failed，0 skipped |
+| `npm run typecheck` | 通过 |
+| `npm run build`（最终） | 通过，Vite 6.4.5，2144 modules，7.11秒 |
+| `AUDIT_I18N=1` 响应式浏览器脚本 | 319 项布局检查通过，无浏览器运行时错误 |
+| `git diff --check` | 无空白错误；仅现有 LF/CRLF 提示 |
+
+使用 Mock API、Mock WebSocket 和测试音频替身，不调用付费模型，不修改真实用户数据库。PowerShell 的 npm.ps1 执行策略限制通过调用 npm.cmd 规避，没有修改系统策略。
+
+### 国际化与录音回归
+
+资源测试验证三语键集合、非空翻译、占位符、插值、单复数、语言及未知键回退、日期与错误码。设置交互回归覆盖 UI 语言偏好变化不会清空尚未保存的其他编辑。
+
+录音切换测试按 `zh-CN → en → ko → zh-CN` 切换，验证语言选择器未禁用、html.lang 更新、采集仅启动一次、切换期间不停止、WebSocket 只有一个且未关闭、只发送一次 start、字幕目标语言不变。真实 AudioWorklet/PCM 连续性、供应商 task_id、长时录音和付费请求计数未通过实机验证，不能据此宣称真实设备零缺口。
+
+### 浏览器与截图
+
+实际 Chromium 加载前端，HTTP/WS 为 Mock，不是实体 iPad 测试。三语 × 明暗主题 × 8 个视口（320×568、375×667、390×844、768×1024、1024×768、1280×800、1440×900、1920×1080）覆盖首页、设置、资料库和会话。原有脚本还检查侧栏、页签、对话框、登录输入框可达性、横屏错误与录音栏。
+
+修复了窄屏英文首页和设置课堂预设长按钮溢出；未降低断言或缩小字号。检查报告：[checks.json](screenshots/i18n-final/checks.json)。
+
+- [英文浅色首页](screenshots/i18n-final/en-light-home.png)
+- [英文深色会话](screenshots/i18n-final/en-dark-session.png)
+- [韩语浅色首页](screenshots/i18n-final/ko-light-home.png)
+- [韩语深色会话](screenshots/i18n-final/ko-dark-session.png)
+
+完整截图位于 `docs/screenshots/i18n-final/`。319 是脚本记录的布局检查项，不是独立设备数量，也不包含完整的所有弹窗三语组合。模型管理弹窗、文件夹管理弹窗、语言原生菜单、登录页三语逐项矩阵、真实读屏/键盘和韩文字体人工审校仍需专项验收。原生键盘检查标记为 `native_keyboard_tested: false`。
+
+实现、部署、语言边界及安全回退参见 [FRONTEND_I18N.md](FRONTEND_I18N.md)。
+
 ## 2026-11-26：音频稳定性 Phase A / B
 
 基线 `2bafeca170d6a0386391ddbef12c0940b7f1d525`；使用现有 Python 3.13 虚拟环境。全部 Mock；密钥环境变量为空，临时SQLite测试库，不调用真实API。

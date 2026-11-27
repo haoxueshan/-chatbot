@@ -648,6 +648,18 @@ test("settings section navigation keeps unsaved subtitle preferences and focuses
   assert.equal(document.activeElement,target);assert.equal(scrolls,1);assert.equal(slider.value,"32");
 });
 
+test("locale-only preferences refresh preserves unsaved settings", async () => {
+  let saved: any;
+  const save = async (value: any) => { saved = value; };
+  const view = await mount(h(Settings, { preferences, save }));
+  await click("应用韩英远场课堂预设（仍需点击保存）");
+  await view.render(h(Settings, { preferences: { ...preferences, ui_language: "ko" }, save }));
+  await click("保存偏好");
+  assert.equal(saved.asr_language_mode, "ko_en");
+  assert.equal(saved.asr_acoustic_profile, "far");
+  assert.equal(saved.target_language, preferences.target_language);
+});
+
 test("new-session dialog blocks dismissal while submitting and preserves create payload", async () => {
   let closed = 0,
     resolve: (value?: unknown) => void = () => {},
@@ -838,6 +850,51 @@ test("subtitle tabs, side collapse, focus and snapshot refresh do not recreate t
   assert.ok(socket.sent.some((x) => x.type === "stop"));
   await view.render(null);
   assert.equal(socket.closed, true);
+});
+
+test("UI language switches preserve the active capture and socket", async () => {
+  const { I18nProvider } = await import("../src/i18n/I18nProvider.tsx");
+  const { LanguageSwitcher } = await import("../src/components/LanguageSwitcher.tsx");
+  const { AudioCapture } = await import("../src/lib/audio.ts");
+  const originalStart = AudioCapture.prototype.start, originalStop = AudioCapture.prototype.stop;
+  let starts = 0, stops = 0;
+  const persisted: string[] = [];
+  AudioCapture.prototype.start = async function () { starts++; };
+  AudioCapture.prototype.stop = function () { stops++; };
+  const props = { session: other, preferences, onActivity(){}, refresh(){}, back(){}, notify(){}, openSession(){}, deleted(){} };
+  try {
+    const view = await mount(h(I18nProvider, {
+      persist: async (language: string) => { persisted.push(language); },
+      children: h(React.Fragment, null, h(LanguageSwitcher), h(SessionView, props)),
+    }));
+    const socket = Socket.instances.at(-1)!;
+    await act(async () => socket.open());
+    await click("开始录音");
+    const request = socket.sent.find(e => e.type === "start");
+    await act(async () => socket.event({ type: "session.state", session_id: other.id, stream_id: "locale-stream", request_id: request.request_id, event_seq: 1, state: "recording", ready: true }));
+    for (const language of ["en", "ko", "zh-CN"]) {
+      const select = view.container.querySelector<HTMLSelectElement>(".language-switcher select")!;
+      assert.equal(select.disabled, false);
+      await act(async () => {
+        select.value = language;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      assert.equal(document.documentElement.lang, language);
+      assert.equal(starts, 1);
+      assert.equal(stops, 0);
+      assert.equal(Socket.instances.length, 1);
+      assert.equal(socket.closed, false);
+      assert.equal(socket.sent.filter(e => e.type === "start").length, 1);
+      assert.equal(preferences.target_language, "zh-CN");
+    }
+    assert.deepEqual(persisted, ["en", "ko", "zh-CN"]);
+    await click("停止录音");
+    assert.equal(stops, 1);
+    await view.render(null);
+  } finally {
+    AudioCapture.prototype.start = originalStart;
+    AudioCapture.prototype.stop = originalStop;
+  }
 });
 
 test("responsive presentation and tools keep one real-mode capture until explicit stop", async () => {

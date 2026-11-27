@@ -26,16 +26,17 @@ import {
   Wifi,
   X,
 } from "lucide-react";
-import { formatDate, formatTime, post, request } from "../lib/api";
+import { formatTime, post, request } from "../lib/api";
+import { formatDate } from "../i18n";
 import { useLive } from "../lib/useLive";
-import { buildTimeline, incidentLabel } from "../lib/timeline";
-import { recognitionStatus } from "../lib/captureHealth";
+import { buildTimeline, incidentCode } from "../lib/timeline";
+import { recognitionStatusCode } from "../lib/captureHealth";
 import type { Citation, Preferences, Session, Stage } from "../lib/types";
 import { Chat } from "./Chat";
 import { DocumentPreview, Library } from "./Library";
 import { Dialog } from "./ui/dialog";
 import { ASRSelector } from "./ASRModels";
-import { asrLanguageLabels } from "../lib/asrLanguages";
+import { useI18n } from "../i18n/I18nProvider";
 
 function sourceReferences(
   item: unknown,
@@ -50,7 +51,7 @@ function sourceReferences(
       typeof source.source_revision === "number",
   );
 }
-function readable(item: unknown): string {
+function readable(item: unknown, labels: { owner: string; date: string; pending: string }): string {
   if (typeof item === "string") return item;
   if (!item || typeof item !== "object") return "";
   const v = item as Record<string, unknown>;
@@ -65,7 +66,7 @@ function readable(item: unknown): string {
       "",
   );
   const meaning = v.definition || v.meaning;
-  return `${text}${meaning ? `：${meaning}` : ""}${v.owner ? ` · 负责人：${v.owner}` : ""}${v.due_original ? ` · 日期原话：${v.due_original}（${v.due_basis || "待确认"}）` : ""}`;
+  return `${text}${meaning ? `: ${meaning}` : ""}${v.owner ? ` · ${labels.owner}: ${v.owner}` : ""}${v.due_original ? ` · ${labels.date}: ${v.due_original} (${v.due_basis || labels.pending})` : ""}`;
 }
 function StagePanel({
   stages,
@@ -78,18 +79,19 @@ function StagePanel({
   busy: boolean;
   jump: (id: string, revision?: number) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="stage-panel">
       <div className="panel-intro">
-        <span className="eyebrow">让重点，自然浮现</span>
-        <p>每三分钟从稳定原文中提取。每个结论都保留来源版本。</p>
+        <span className="eyebrow">{t("stage.eyebrow")}</span>
+        <p>{t("stage.intro")}</p>
         <button className="secondary full" disabled={busy} onClick={generate}>
           {busy ? (
             <LoaderCircle size={15} className="spin" />
           ) : (
             <RefreshCw size={15} />
           )}
-          生成当前阶段重点
+          {t("stage.generate")}
         </button>
       </div>
       {stages.length ? (
@@ -97,16 +99,16 @@ function StagePanel({
           <article className="stage-card" key={s.id}>
             <div className="stage-number">
               <span>{String(index + 1).padStart(2, "0")}</span>
-              <small>阶段重点</small>
+              <small>{t("stage.highlights")}</small>
             </div>
-            <h3>{s.topic && !/^(none|null|undefined)$/i.test(s.topic.trim()) ? s.topic : `阶段 ${index + 1}`}</h3>
+            <h3>{s.topic && !/^(none|null|undefined)$/i.test(s.topic.trim()) ? s.topic : t("stage.number", { count: index + 1 })}</h3>
             <p>{s.summary}</p>
-            {s.superseded && <p className="info-box">历史阶段 · 来源已更新，以上结论基于旧版本，请核对新版阶段；原句引用仍可查看。</p>}
+            {s.superseded && <p className="info-box">{t("stage.historical")}</p>}
             {[
-              ["知识点", s.knowledge_points],
-              ["术语", s.terms],
-              ["明确决议", s.decisions],
-              ["行动项", s.action_items],
+              [t("stage.knowledge"), s.knowledge_points],
+              [t("stage.terms"), s.terms],
+              [t("stage.decisions"), s.decisions],
+              [t("stage.actions"), s.action_items],
             ].map(
               ([label, items]) =>
                 Array.isArray(items) &&
@@ -116,7 +118,7 @@ function StagePanel({
                     <ul>
                       {items.map((v, i) => (
                         <li key={i}>
-                          {readable(v)}
+                          {readable(v, { owner: t("stage.owner"), date: t("stage.originalDate"), pending: t("stage.unconfirmed") })}
                           {sourceReferences(v).length > 0 && (
                             <div className="source-chips">
                               {sourceReferences(v).map(
@@ -133,7 +135,7 @@ function StagePanel({
                                       )
                                     }
                                   >
-                                    <BookOpen size={11} /> 原句 v
+                                    <BookOpen size={11} /> {t("stage.original")} v
                                     {source.source_revision}
                                   </button>
                                 ),
@@ -160,7 +162,7 @@ function StagePanel({
                     key={id}
                   >
                     <BookOpen size={11} />
-                    来源 {i + 1}
+                    {t("stage.source", { count: i + 1 })}
                   </button>
                 ))}
               </div>
@@ -170,12 +172,12 @@ function StagePanel({
       ) : (
         <div className="empty-state compact">
           <Sparkles size={29} />
-          <h3>先听懂，再提炼</h3>
-          <p>会话开始后，稳定原文会形成阶段重点。也可以手动生成。</p>
+          <h3>{t("stage.empty")}</h3>
+          <p>{t("stage.emptyHint")}</p>
         </div>
       )}
       <div className="panel-footnote">
-        未明确提及的负责人和日期保留为空；相对日期以原话为准。
+        {t("stage.footnote")}
       </div>
     </div>
   );
@@ -200,12 +202,13 @@ export function SessionView({
   openSession: (id: string) => void;
   deleted: () => void;
 }) {
+  const { t, language } = useI18n();
   const [microphoneId, setMicrophoneId] = useState(() => {
     try { return typeof window === "undefined" ? "" : window.localStorage.getItem("classbridge.microphone.v1") || ""; }
     catch { return ""; }
   });
   const [microphones, setMicrophones] = useState<{ deviceId: string; label: string }[]>([]);
-  const [deviceError,setDeviceError]=useState("");
+  const [deviceError,setDeviceError]=useState<"" | "sessionDetails.devicesUnsupported" | "sessionDetails.devicesFailed">("");
   const [modelBusy,setModelBusy]=useState(false),[selectedModel,setSelectedModel]=useState(session.asr_profile_id || "");
   useEffect(()=>setSelectedModel(session.asr_profile_id || ""),[session.id,session.asr_profile_id]);
   const deviceGeneration=useRef(0);
@@ -217,14 +220,14 @@ export function SessionView({
   const refreshMicrophones = () => {
     const generation=++deviceGeneration.current;
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) {
-      setDeviceError("浏览器暂不支持设备列表；请使用安全连接，可选择系统默认麦克风。");return;
+      setDeviceError("sessionDetails.devicesUnsupported");return;
     }
     void navigator.mediaDevices.enumerateDevices().then((items) => {
       if(!devicesMounted.current || generation!==deviceGeneration.current)return;
       setMicrophones(items.filter((item) => item.kind === "audioinput" && item.deviceId)
         .map((item) => ({ deviceId: item.deviceId, label: item.label })));
       setDeviceError("");
-    }).catch(() => {if(devicesMounted.current && generation===deviceGeneration.current)setDeviceError("无法读取麦克风列表，请检查浏览器权限并重试；没有自动切换设备。");});
+    }).catch(() => {if(devicesMounted.current && generation===deviceGeneration.current)setDeviceError("sessionDetails.devicesFailed");});
   };
   useEffect(() => {
     if (session.mode !== "real" || typeof navigator === "undefined") return;
@@ -321,7 +324,7 @@ export function SessionView({
             quote: source.text,
           });
       } catch (e) {
-        notify(e instanceof Error ? e.message : "无法读取来源版本");
+        notify(t("common.error"));
       }
     }
   };
@@ -329,10 +332,10 @@ export function SessionView({
     setBusy(true);
     try {
       await post(`/sessions/${session.id}/summarize`);
-      notify("已提交阶段提取任务");
+      notify(t("sessionDetails.summaryQueued"));
       refresh();
     } catch (e) {
-      notify(e instanceof Error ? e.message : "提取失败");
+      notify(t("common.error"));
     } finally {
       setBusy(false);
     }
@@ -348,7 +351,7 @@ export function SessionView({
         `/sessions/${session.id}/exports`,
         { format },
       );
-      notify("已提交后台导出任务");
+      notify(t("sessionDetails.exportQueued"));
       for (let i = 0; i < 60; i++) {
         const state = await request<{
           status: string;
@@ -360,17 +363,17 @@ export function SessionView({
           a.href = state.download_url;
           a.download = "";
           a.click();
-          notify("报告已生成");
+          notify(t("sessionDetails.exportReady"));
           return;
         }
         if (state.status === "failed")
-          throw new Error(state.error || "导出失败");
+          throw new Error("export_failed");
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      notify("导出仍在后台处理，完成后可从后台任务列表下载。");
+      notify(t("sessionDetails.exportPending"));
       refresh();
     } catch (e) {
-      notify(e instanceof Error ? e.message : "导出失败");
+      notify(t("common.error"));
     } finally {
       setExportBusy(false);
     }
@@ -384,7 +387,7 @@ export function SessionView({
           <h1 title={session.title}>{session.title}</h1>
           <div className="session-reading-meta">
             <span className={`badge ${session.mode === "demo" ? "amber" : "blue"}`}>
-              {session.mode === "demo" ? "模拟 · 不调用付费 API" : "真实模式"}
+              {t(session.mode === "demo" ? "sessionTools.demo" : "sessionTools.real")}
             </span>
             <span>
               <Languages size={13} />
@@ -401,16 +404,16 @@ export function SessionView({
             }
           }}
         >
-          <summary aria-label="会话工具与详情" title="会话工具与详情">
+          <summary aria-label={t("sessionTools.details")} title={t("sessionTools.details")}>
             <ChevronDown size={18} />
-            <span>工具与详情</span>
+            <span>{t("sessionTools.tools")}</span>
           </summary>
           <div className="session-details-content">
             {session.mode==="real" && <ASRSelector value={selectedModel} historical={session.asr_snapshot?.display_name}
               disabled={live.active || live.settling || modelBusy || ["preparing","recording","processing"].includes(session.status)}
               onChange={id=>{setModelBusy(true);void request(`/sessions/${session.id}/asr-profile`,{method:"PATCH",body:JSON.stringify({asr_profile_id:id})})
                 .then(()=>{setSelectedModel(id);refresh();}).catch(e=>notify(e.message)).finally(()=>setModelBusy(false));}}/>}
-            {session.asr_streams?.length ? <details><summary>历史录音模型</summary>{session.asr_streams.map(s=><p key={s.stream_id} className="tiny muted">{formatTime(s.offset_ms)} · {s.snapshot?.provider || "旧记录"} / {s.snapshot?.model_id || "未记录模型"}{s.snapshot?.provenance==="legacy_environment_assumed"?"（按升级时旧配置补记）":""}</p>)}</details> : null}
+            {session.asr_streams?.length ? <details><summary>{t("sessionDetails.history")}</summary>{session.asr_streams.map(s=><p key={s.stream_id} className="tiny muted">{formatTime(s.offset_ms)} · {s.snapshot?.provider || t("sessionDetails.legacy")} / {s.snapshot?.model_id || t("sessionDetails.unknownModel")}{s.snapshot?.provenance==="legacy_environment_assumed"?t("sessionDetails.assumed"):""}</p>)}</details> : null}
             <p className="session-full-title">{session.title}</p>
             <button
               className="back-link"
@@ -418,38 +421,38 @@ export function SessionView({
               disabled={live.active || live.settling}
             >
               <ChevronLeft size={14} />
-              全部会话
+              {t("sessionTools.all")}
             </button>
             <div className="session-meta">
-              <span>{formatDate(session.created_at)}</span>
+              <span>{formatDate(language, session.created_at)}</span>
               <span>·</span>
               <span>
                 <Languages size={13} />
                 {session.mode === "demo"
-                  ? `韩语 / 英语 → ${targetLabel}`
+                  ? t("sessionDetails.demoHint", { target: targetLabel })
                   : live.active
-                    ? `当前识别提示：${live.preparing ? "准备中" : live.effectiveASR?.hints === undefined ? "服务端未报告" : live.effectiveASR.hints.length ? live.effectiveASR.hints.join(" / ") : "全部语言自动识别"} → ${targetLabel}`
-                    : `下次识别提示：${asrLanguageLabels[preferences.asr_language_mode || "auto"]}（偏好设置；实际以所选模型配置为准） → ${targetLabel}`}
+                    ? t("sessionDetails.currentHint", { hint: live.preparing ? t("sessionDetails.waiting") : live.effectiveASR?.hints === undefined ? t("settings.unreported") : live.effectiveASR.hints.length ? live.effectiveASR.hints.join(" / ") : t("settings.asrAuto"), target: targetLabel })
+                    : t("sessionDetails.nextHint", { hint: t(preferences.asr_language_mode === "ko" ? "settings.asrKo" : preferences.asr_language_mode === "ko_en" ? "settings.asrKoEn" : "settings.asrAuto"), target: targetLabel })}
               </span>
               {live.active && live.effectiveASR?.model && (
-                <span>当前识别模型：{live.effectiveASR.provider} / {live.effectiveASR.model}</span>
+                <span>{t("sessionDetails.currentModel")} {live.effectiveASR.provider} / {live.effectiveASR.model}</span>
               )}
               {live.active && live.translationTarget && (
                 <span>
-                  服务端目标：{translationLanguageLabel(live.translationTarget)}
+                  {t("sessionDetails.serverTarget")} {translationLanguageLabel(live.translationTarget)}
                 </span>
               )}
               <span
                 className={`badge ${session.mode === "demo" ? "amber" : "blue"}`}
               >
-                {session.mode === "demo" ? "模拟演示" : "真实模式"}
+                {t(session.mode === "demo" ? "sessionTools.demo" : "sessionTools.real")}
               </span>
             </div>
             <div className="session-tools">
               <button
                 className="icon-button"
-                title="本会话资料"
-                aria-label="本会话资料"
+                title={t("sessionTools.documents")}
+                aria-label={t("sessionTools.documents")}
                 disabled={live.active || live.settling}
                 onClick={() => setDocumentsOpen(true)}
               >
@@ -457,13 +460,13 @@ export function SessionView({
               </button>
               <button
                 className="icon-button danger"
-                title="删除会话"
-                aria-label="删除会话"
+                title={t("sessionTools.delete")}
+                aria-label={t("sessionTools.delete")}
                 disabled={live.active || live.settling}
                 onClick={async () => {
                   if (
                     confirm(
-                      "确定删除整个会话？字幕、音频、资料及派生内容将被删除。",
+                      t("sessionTools.deleteConfirm"),
                     )
                   ) {
                     try {
@@ -472,7 +475,7 @@ export function SessionView({
                       });
                       deleted();
                     } catch (e) {
-                      notify(e instanceof Error ? e.message : "删除失败");
+                      notify(t("common.error"));
                     }
                   }
                 }}
@@ -486,15 +489,15 @@ export function SessionView({
                   onClick={() => setExporting(!exporting)}
                 >
                   <Download size={15} />
-                  <span>{exportBusy ? "生成中" : "导出"}</span>
+                  <span>{t(exportBusy ? "sessionTools.exporting" : "sessionTools.export")}</span>
                   <ChevronDown size={13} />
                 </button>
                 {exporting && (
                   <div className="dropdown-menu">
                     {[
                       ["md", "Markdown"],
-                      ["txt", "纯文本 TXT"],
-                      ["pdf", "PDF 报告"],
+                      ["txt", t("sessionTools.txt")],
+                      ["pdf", t("sessionTools.pdf")],
                     ].map(([value, label]) => (
                       <a
                         key={value}
@@ -513,16 +516,16 @@ export function SessionView({
               </div>
               <button
                 className="icon-button"
-                title={focus ? "退出专注" : "专注阅读"}
-                aria-label="切换专注阅读"
+                title={t(focus ? "sessionTools.exitFocus" : "sessionTools.focus")}
+                aria-label={t("sessionTools.toggleFocus")}
                 onClick={() => setFocus(!focus)}
               >
                 {focus ? <Expand size={18} /> : <Focus size={18} />}
               </button>
               <button
                 className="icon-button desktop-side-toggle"
-                title={sidebar ? "收起侧栏" : "展开侧栏"}
-                aria-label="切换侧栏"
+                title={t(sidebar ? "sessionTools.collapse" : "sessionTools.expand")}
+                aria-label={t("sessionTools.toggleSidebar")}
                 onClick={() => setSidebar(!sidebar)}
               >
                 {sidebar ? (
@@ -543,12 +546,12 @@ export function SessionView({
                 )}
                 <strong>
                   {session.mode === "demo"
-                    ? "模拟演示，不调用付费 API"
-                    : "真实语音理解"}
+                    ? t("sessionExtra.demo")
+                    : t("sessionExtra.real")}
                 </strong>
                 {live.active && !live.preparing && live.translationTarget && (
                   <small>
-                    本次翻译：{translationLanguageLabel(live.translationTarget)}
+                    {t("sessionDetails.translation")} {translationLanguageLabel(live.translationTarget)}
                   </small>
                 )}
                 {session.mode === "real" &&
@@ -556,25 +559,22 @@ export function SessionView({
                   !live.preparing &&
                   live.asrEnhancement && (
                     <small>
-                      本次热词 {live.asrEnhancement.hotword_count} 项 · 课程背景{" "}
-                      {live.asrEnhancement.context_chars} 字
+                      {t("sessionDetails.enhancement", { count: live.asrEnhancement.hotword_count, chars: live.asrEnhancement.context_chars })}
                     </small>
                   )}
                 <span>
-                  {session.mode === "demo"
-                    ? "演示字幕带模拟标记，不使用麦克风。"
-                    : "保持页面在前台，不保证锁屏或后台录音。"}
+                  {t(session.mode === "demo" ? "sessionDetails.demoNotice" : "sessionDetails.foreground")}
                 </span>
               </span>
               <span className="saved-indicator">
                 <Check size={14} />
-                稳定字幕自动保存
+                {t("sessionTools.saved")}
               </span>
             </div>
             <div className="subtitle-footer">
               <span>
                 <Check size={13} />
-                已保存的内容可刷新恢复
+                {t("sessionTools.restore")}
               </span>
               <div>
                 <button
@@ -582,7 +582,7 @@ export function SessionView({
                   disabled={live.active || live.settling || !live.segments.length}
                   onClick={async () => {
                     if (
-                      confirm("确定清空此会话的字幕与派生内容？此操作不可撤销。")
+                      confirm(t("sessionTools.clearConfirm"))
                     ) {
                       try {
                         const result = await request<{ event_seq?: number }>(
@@ -594,47 +594,43 @@ export function SessionView({
                         live.clear(result.event_seq);
                         refresh();
                       } catch (e) {
-                        notify(e instanceof Error ? e.message : "清空失败");
+                        notify(t("common.error"));
                       }
                     }
                   }}
                 >
                   <Trash2 size={13} />
-                  清空
+                  {t("sessionTools.clear")}
                 </button>
               </div>
             </div>
             {session.mode === "real" && (
               <details className="microphone-options">
                 <summary>
-                  麦克风与拾音设置 ·{" "}
-                  {live.asrAcousticProfile === "near"
-                    ? "本次近场"
-                    : live.asrAcousticProfile === "far"
-                      ? "本次远场"
-                      : "等待识别场景确认"}
+                  {t("sessionDetails.microphone")} ·{" "}
+                  {t(live.asrAcousticProfile === "near" ? "sessionDetails.near" : live.asrAcousticProfile === "far" ? "sessionDetails.far" : "sessionDetails.waiting")}
                 </summary>
                 <div className="microphone-controls">
-                  <label htmlFor="classbridge-microphone">麦克风：</label>
+                  <label htmlFor="classbridge-microphone">{t("sessionTools.microphone")}</label>
                   <select
                     id="classbridge-microphone"
-                    aria-label="录音麦克风"
+                    aria-label={t("sessionTools.recordingMicrophone")}
                     disabled={live.active || live.settling}
                     value={microphoneId}
                     onChange={(event) => chooseMicrophone(event.target.value)}
                   >
-                    <option value="">系统默认麦克风</option>
+                    <option value="">{t("sessionTools.defaultMicrophone")}</option>
                     {microphoneId &&
                       !microphones.some((m) => m.deviceId === microphoneId) && (
                         <option value={microphoneId}>
-                          此前选择的设备（可能已断开）
+                          {t("sessionTools.previousDevice")}
                         </option>
                       )}
                     {microphones
                       .filter((m) => m.deviceId !== "default")
                       .map((m, index) => (
                         <option key={m.deviceId} value={m.deviceId}>
-                          {m.label || `麦克风 ${index + 1}`}
+                          {m.label || t("sessionTools.device", { number: index + 1 })}
                         </option>
                       ))}
                   </select>
@@ -644,49 +640,41 @@ export function SessionView({
                     onClick={refreshMicrophones}
                     disabled={live.active || live.settling}
                   >
-                    刷新设备
+                    {t("sessionTools.refreshDevices")}
                   </button>
                   <span className="tiny muted">
-                    本次识别：
-                    {live.asrAcousticProfile === "near"
-                      ? "近场"
-                      : live.asrAcousticProfile === "far"
-                        ? "远场"
-                        : "尚未收到服务端确认"}{" "}
-                    · 下次请求：
-                    {preferences.audio_processing_mode === "natural"
-                      ? "浏览器原声模式"
-                      : "浏览器标准处理"}
+                    {t("sessionDetails.current")}
+                    {t(live.asrAcousticProfile === "near" ? "settings.near" : live.asrAcousticProfile === "far" ? "settings.far" : "sessionDetails.waiting")}{" "}
+                    · {t("sessionDetails.next")}
+                    {t(preferences.audio_processing_mode === "natural" ? "settings.natural" : "settings.standard")}
                   </span>
-                  {deviceError && <span role="status">{deviceError}</span>}
+                  {deviceError && <span role="status">{t(deviceError)}</span>}
                   {live.appliedAudio && (
                     <span className="tiny muted">
-                      浏览器实际报告：
+                      {t("sessionDetails.browser")}
                       {(
                         [
-                          ["echoCancellation", "回声消除"],
-                          ["noiseSuppression", "降噪"],
-                          ["autoGainControl", "自动增益"],
+                          ["echoCancellation", t("sessionDetails.echo")],
+                          ["noiseSuppression", t("sessionDetails.noise")],
+                          ["autoGainControl", t("sessionDetails.gain")],
                         ] as const
                       )
                         .map(
                           ([key, label]) =>
-                            `${label}${live.appliedAudio?.[key] === undefined ? "未报告" : live.appliedAudio[key] ? "开" : "关"}`,
+                            `${label}: ${t(live.appliedAudio?.[key] === undefined ? "settings.unreported" : live.appliedAudio[key] ? "sessionDetails.on" : "sessionDetails.off")}`,
                         )
                         .join(" · ")}
-                      （硬件处理未知）
+                      {t("sessionDetails.hardware")}
                     </span>
                   )}
                   {live.active && live.audioQuality && (
                     <span className="tiny muted">
-                      峰值 {live.inputPeak.toFixed(2)} /{" "}
-                      {Math.round(live.audioQuality.peak_window_ms)}ms窗口 ·
-                      电平不是识别置信度
+                      {t("sessionDetails.peak", { peak: live.inputPeak.toFixed(2), window: Math.round(live.audioQuality.peak_window_ms) })}
                     </span>
                   )}
                   {live.active && live.audioQuality?.possible_clipping && (
                     <strong role="status">
-                      输入连续接近满幅，可能削波；请检查设备增益
+                      {t("sessionDetails.clipping")}
                     </strong>
                   )}
                 </div>
@@ -696,37 +684,37 @@ export function SessionView({
               <span>
                 {session.retain_audio
                   ? session.mode === "demo"
-                    ? "模拟不保存音频"
-                    : `音频保留 ${preferences.audio_retention_days} 天`
-                  : "仅保存文字"}
+                    ? t("sessionDetails.noDemoAudio")
+                    : t("sessionDetails.retention", { count: preferences.audio_retention_days })
+                  : t("sessionDetails.textOnly")}
               </span>
               <button
                 className="text-button"
                 disabled={live.active || live.settling || !audioAvailable}
                 title={
                   audioAvailable
-                    ? "使用保留音频生成独立新版本"
-                    : "没有可用音频；请在创建真实会话前开启音频保留"
+                    ? t("sessionDetails.reprocessHint")
+                    : t("sessionDetails.noAudio")
                 }
                 onClick={async () => {
                   try {
                     await post(`/sessions/${session.id}/reprocess`);
-                    notify("会后校正任务已提交，新版本不会覆盖旧引用");
+                    notify(t("sessionDetails.reprocessQueued"));
                     refresh();
                   } catch (e) {
-                    notify(e instanceof Error ? e.message : "无法进行会后校正");
+                    notify(t("common.error"));
                   }
                 }}
               >
                 <RefreshCw size={12} />
-                会后校正
+                {t("sessionDetails.reprocess")}
               </button>
             </div>
             {!!Object.keys(live.latency).length && (
               <div className="latency-strip">
                 {session.mode === "demo"
-                  ? "模拟时序（非真实延迟）："
-                  : "服务端测量（不含浏览器绘制）：原文/预览首字距语音起点；正式结果距语音终点；排队/模型为独立耗时"}
+                  ? t("sessionExtra.simulatedLatency")
+                  : t("sessionExtra.latency")}
                 {Object.entries(live.latency)
                   .filter(
                     ([key, value]) =>
@@ -745,14 +733,14 @@ export function SessionView({
                     <span key={key}>
                       {(
                         {
-                          source_first_ms: "原文首字",
-                          source_final_ms: "原文定稿",
-                          translation_first_ms: "译文首字",
-                          translation_final_ms: "译文定稿",
-                          preview_first_ms: "临时译文首字",
-                          translation_queue_ms: "后台排队",
-                          translation_model_first_ms: "模型首字耗时",
-                          translation_model_final_ms: "模型完成耗时",
+                          source_first_ms: t("sessionExtra.source_first_ms"),
+                          source_final_ms: t("sessionExtra.source_final_ms"),
+                          translation_first_ms: t("sessionExtra.translation_first_ms"),
+                          translation_final_ms: t("sessionExtra.translation_final_ms"),
+                          preview_first_ms: t("sessionExtra.preview_first_ms"),
+                          translation_queue_ms: t("sessionExtra.translation_queue_ms"),
+                          translation_model_first_ms: t("sessionExtra.translation_model_first_ms"),
+                          translation_model_final_ms: t("sessionExtra.translation_model_final_ms"),
                         } as Record<string, string>
                       )[key] || key}{" "}
                       {Math.max(0, Math.round(Number(value)))}ms
@@ -765,32 +753,32 @@ export function SessionView({
       </div>
       {live.preparing && (
         <div className="mode-banner real" role="status">
-          正在准备识别服务，请稍候再说话；准备完成后开始采音计时。
+          {t("capture.preparing")}
         </div>
       )}
       {!live.preparing && live.health && (
         <details className="info-box capture-health">
-          <summary role="status">{!live.active ? `录音已停止${live.health.first_failure_code ? ` · ${live.health.first_failure_code}` : ""}` : live.browserBufferWarning ? "正在录音 · 浏览器音频发送稍有延迟" : recognitionStatus(live.health)}</summary>
+          <summary role="status">{!live.active ? `${t("diagnostics.stopped")}${live.health.first_failure_code ? ` · ${live.health.first_failure_code}` : ""}` : live.browserBufferWarning ? t("diagnostics.browserDelay") : t(`diagnostics.${recognitionStatusCode(live.health)}`, { seconds: Math.floor(live.health.last_transcript_age_ms / 1000) })}</summary>
           <p className="tiny muted">
-            服务器已收到 {(live.health.received_audio_ms / 1000).toFixed(1)} 秒音频 ·
-            已向识别服务发送 {(live.health.sent_audio_ms / 1000).toFixed(1)} 秒 ·
-            待转发 {live.health.queued_audio_ms} 毫秒 ·
-            输入电平 {live.health.input_dbfs} dBFS
+            {t("diagnostics.received")} {(live.health.received_audio_ms / 1000).toFixed(1)} s ·
+            {t("diagnostics.sent")} {(live.health.sent_audio_ms / 1000).toFixed(1)} s ·
+            {t("diagnostics.queued")} {live.health.queued_audio_ms} ms ·
+            {t("diagnostics.level")} {live.health.input_dbfs} dBFS
           </p>
           <p className="tiny muted">
             {live.effectiveASR?.provider} / {live.effectiveASR?.model} ·
-            采集 {live.health.capture_state || "CAPTURING"} · 识别 {live.health.asr_state || "STREAMING"} ·
-            浏览器缓冲估算 {Math.round(live.browserBufferMs)} 毫秒 ·
-            聚合 {(live.health.batch_pending_pcm_bytes || 0)/32} 毫秒 ·
-            在途 {(live.health.upstream_inflight_pcm_bytes || 0)/32} 毫秒 ·
-            当前发送等待 {live.health.current_send_wait_ms || 0} 毫秒 ·
-            WAV 已写入 {((live.health.archive_written_pcm_bytes || 0)/32000).toFixed(1)} 秒（收尾后确认保存） ·
-            ASR 结果队列 {live.health.asr_result_queue_size || 0} ·
-            事件循环延迟 {live.health.event_loop_lag_ms || 0} 毫秒 ·
-            后台任务 {live.health.pending_processing_tasks || 0} ·
-            自动恢复未启用
+            {t("diagnostics.capture")} {live.health.capture_state || "CAPTURING"} · {t("diagnostics.recognition")} {live.health.asr_state || "STREAMING"} ·
+            {t("diagnostics.browserBuffer")} {Math.round(live.browserBufferMs)} ms ·
+            {t("diagnostics.batch")} {(live.health.batch_pending_pcm_bytes || 0)/32} ms ·
+            {t("diagnostics.inflight")} {(live.health.upstream_inflight_pcm_bytes || 0)/32} ms ·
+            {t("diagnostics.sendWait")} {live.health.current_send_wait_ms || 0} ms ·
+            {t("diagnostics.archive")} {((live.health.archive_written_pcm_bytes || 0)/32000).toFixed(1)} s ({t("diagnostics.archiveHint")}) ·
+            {t("diagnostics.resultQueue")} {live.health.asr_result_queue_size || 0} ·
+            {t("diagnostics.eventLoop")} {live.health.event_loop_lag_ms || 0} ms ·
+            {t("diagnostics.tasks")} {live.health.pending_processing_tasks || 0} ·
+            {t("diagnostics.recoveryDisabled")}
           </p>
-          <p className="tiny muted">电平表示声音强弱，不能据此判断是否有人说话。已发送也不代表模型已完成识别。</p>
+          <p className="tiny muted">{t("diagnostics.levelHint")}</p>
         </details>
       )}
       {live.notice && (
@@ -798,7 +786,7 @@ export function SessionView({
           <span>{live.notice}</span>
           <button
             className="icon-button"
-            aria-label="关闭提示"
+            aria-label={t("common.dismiss")}
             onClick={() => live.setNotice("")}
           >
             <X size={15} />
@@ -807,9 +795,9 @@ export function SessionView({
       )}
       <div className="mobile-tabs">
         {[
-          ["subtitles", "双语字幕", FileText],
-          ["summary", "阶段重点", Sparkles],
-          ["chat", "AI 问答", MessageSquare],
+          ["subtitles", t("transcript.title"), FileText],
+          ["summary", t("stage.highlights"), Sparkles],
+          ["chat", t("chat.tab"), MessageSquare],
         ].map(([key, label, Icon]) => {
           const I = Icon as typeof FileText;
           return (
@@ -831,21 +819,21 @@ export function SessionView({
           <div className="subtitle-toolbar">
             <h2>
               <AudioMark />
-              双语字幕<span>{live.segments.length} 个片段</span>
+              {t("transcript.title")}<span>{t("transcript.count", { count: live.segments.length })}</span>
             </h2>
             <button
               className="text-button"
-              aria-label={showOriginal ? "隐藏原文" : "显示原文"}
+              aria-label={showOriginal ? t("transcript.hide") : t("transcript.show")}
               onClick={() => setShowOriginal(!showOriginal)}
             >
               {showOriginal ? <Eye size={15} /> : <EyeOff size={15} />}
-              <span>{showOriginal ? "显示原文" : "隐藏原文"}</span>
+              <span>{showOriginal ? t("transcript.show") : t("transcript.hide")}</span>
             </button>
           </div>
           <div
             className="subtitle-list"
             role="region"
-            aria-label="双语字幕记录"
+            aria-label={t("transcript.region")}
             tabIndex={0}
             ref={list}
             onScroll={() => {
@@ -861,21 +849,21 @@ export function SessionView({
                 <span className="empty-mic">
                   <Mic size={35} />
                 </span>
-                <span className="eyebrow">READY WHEN YOU ARE</span>
-                <h2>准备好，听见新知识。</h2>
+                <span className="eyebrow">{t("sessionExtra.ready")}</span>
+                <h2>{t("transcript.empty")}</h2>
                 <p>
                   {session.mode === "demo"
-                    ? "点击下方「开始模拟」，体验韩英课堂的双语字幕。"
-                    : "点击「开始录音」后申请麦克风权限，原文与译文将在这里实时出现。"}
+                    ? t("transcript.demoHint")
+                    : t("transcript.realHint")}
                 </p>
                 <div>
                   <span>
                     <Languages size={16} />
-                    保留韩英原文
+                    {t("transcript.keep")}
                   </span>
                   <span>
                     <BookOpen size={16} />
-                    引用回到来源
+                    {t("transcript.cite")}
                   </span>
                 </div>
               </div>
@@ -883,7 +871,8 @@ export function SessionView({
             {timeline.map((item) => {
               if (item.kind === "gap") return (
                 <div className="gap-marker" key={item.key}>
-                  {formatTime(item.time)} · {incidentLabel(item.related)} · {Array.from(new Set(item.related.map(e=>e.message).filter(Boolean))).join("；") || "此时段处理状态待确认"}
+                  {formatTime(item.time)} · {t(`diagnostics.incident.${incidentCode(item.related)}`)}
+                  {incidentCode(item.related) === "unknown" && <> · {Array.from(new Set(item.related.map(e=>e.message).filter(Boolean))).join("；") || t("diagnostics.incident.pending")}</>}
                 </div>
               );
               const s = item.segment;
@@ -900,20 +889,20 @@ export function SessionView({
                     {formatTime(s.end_ms)}
                   </span>
                   <span className="segment-status">
-                    {s.source_status === "interrupted" ? "识别未完成 · 待确认" : s.source_final ? (
-                      <><Check size={12} />原文已定稿</>
-                    ) : "识别中 · 临时字幕"}
+                    {s.source_status === "interrupted" ? t("transcript.uncertain") : s.source_final ? (
+                      <><Check size={12} />{t("transcript.final")}</>
+                    ) : t("transcript.partial")}
                   </span>
-                  {s.mode === "demo" && <span className="demo-mark">模拟</span>}
+                  {s.mode === "demo" && <span className="demo-mark">{t("transcript.demo")}</span>}
                   <span className="revision">v{s.source_revision}</span>
                   {s.speaker != null && (
                     <button
                       className="text-button"
                       disabled={live.active || live.settling}
-                      title="说话人编号不等于真实姓名，点击人工映射"
+                      title={t("sessionExtra.speakerHint")}
                       onClick={async () => {
                         const name = prompt(
-                          `为说话人 ${s.speaker} 设置显示名称（人工确认）`,
+                          t("sessionExtra.speakerPrompt", { speaker: s.speaker! }),
                           session.speaker_names?.[s.speaker!] || "",
                         );
                         if (name !== null) {
@@ -929,22 +918,22 @@ export function SessionView({
                             });
                             refresh();
                           } catch (e) {
-                            notify(e instanceof Error ? e.message : "映射失败");
+                            notify(t("common.error"));
                           }
                         }
                       }}
                     >
                       {session.speaker_names?.[s.speaker] ||
-                        `说话人 ${s.speaker}`}
+                        t("sessionExtra.speaker", { speaker: s.speaker })}
                     </button>
                   )}
                 </div>
                 {(showOriginal || s.source_status === "interrupted") && (
                   <p className="source-text" lang="und">
                     {!s.source_final && s.stable_preview !== undefined ? <>
-                      <span className="stable-source-preview" title="相对稳定预览，仍可被识别服务修订">{s.stable_preview}</span>
-                      <span className="unstable-source-tail" title="正在变化的原文">{s.unstable_tail}</span>
-                    </> : s.text || "等待原文…"}
+                      <span className="stable-source-preview" title={t("transcript.stable")}>{s.stable_preview}</span>
+                      <span className="unstable-source-tail" title={t("transcript.unstable")}>{s.unstable_tail}</span>
+                    </> : s.text || t("transcript.wait")}
                   </p>
                 )}
                 <p
@@ -953,21 +942,21 @@ export function SessionView({
                   className={`translation-text ${!s.translation_final ? "temporary" : ""}`}
                   style={{ fontSize: preferences.subtitle_size || 24 }}
                 >
-                  {s.source_status === "interrupted" ? "对应原文尚未正式确认" : s.translation || (s.translation_status === "failed" ? "翻译失败，原文已保留" : (
+                  {s.source_status === "interrupted" ? t("translation.unconfirmed") : s.translation || (s.translation_status === "failed" ? t("translation.failed") : (
                     <span className="translation-waiting">
-                      <span className="typing-dots">•••</span> 正在翻译为{targetLabel}…
+                      <span className="typing-dots">•••</span> {t("translation.wait", { language: targetLabel })}
                     </span>
                   ))}
                 </p>
-                {s.translation && s.translation_status === "failed" && <small className="temporary-label" role="status">翻译更新失败 · 保留仍兼容的临时译文，尚未正式完成</small>}
-                {s.translation_final && <small className="translation-status">{targetLabel}翻译已完成</small>}
+                {s.translation && s.translation_status === "failed" && <small className="temporary-label" role="status">{t("translation.updateFailed")}</small>}
+                {s.translation_final && <small className="translation-status">{t("translation.done", { language: targetLabel })}</small>}
                 {s.translation && !s.translation_final && s.translation_status !== "failed" && (
                   <small className="temporary-label">
-                    {s.source_final ? `正在翻译为${targetLabel}… · 当前为临时译文` : s.preview_source_text ? "临时翻译预览 · 仅对应已翻译部分，可被替换" : "临时译文 · 会随原文修订"}
+                    {s.source_final ? t("translation.temporary", { language: targetLabel }) : s.preview_source_text ? t("translation.preview") : t("translation.revisable")}
                   </small>
                 )}
                 {s.provenance === "user_correction" && <button className="text-button" onClick={() => void jumpEvidence(s.sentence_id, s.source_revision - 1)}>
-                  已人工采纳校正 · 查看校正前原文 v{s.source_revision - 1}
+                  {t("sessionExtra.corrected", { revision: s.source_revision - 1 })}
                 </button>}
               </article>
               );
@@ -983,7 +972,7 @@ export function SessionView({
               }}
             >
               <ArrowDown size={14} />
-              回到最新
+              {t("transcript.latest")}
             </button>
           )}
         </section>
@@ -994,14 +983,14 @@ export function SessionView({
               onClick={() => setSideTab("summary")}
             >
               <Sparkles size={16} />
-              阶段重点
+              {t("stage.highlights")}
             </button>
             <button
               className={sideTab === "chat" ? "active" : ""}
               onClick={() => setSideTab("chat")}
             >
               <MessageSquare size={16} />
-              AI 问答
+              {t("chat.tab")}
             </button>
           </div>
           <div
@@ -1025,27 +1014,27 @@ export function SessionView({
           </div>
         </aside>
       </div>
-      <div className="capture-bar" aria-label="录音控制">
+      <div className="capture-bar" aria-label={t("capture.controls")}>
         <div className="capture-left">
           <span
-            className={`connection-dot ${live.connection === "已连接" ? "connected" : ""}`}
+            className={`connection-dot ${live.connection === "connected" ? "connected" : ""}`}
           />
           <div>
-            <strong>{live.connection}</strong>
+            <strong>{t(`capture.${live.connection}`)}</strong>
             <small>
               <Wifi size={11} />
-              发送队列 {live.queue} 帧
+              {t("capture.queue", { count: live.queue })}
             </small>
           </div>
           <div className="capture-divider" />
-          <span className="capture-time" title="累计采音时长，不含暂停间隔；字幕保留原始时间轴">
+          <span className="capture-time" title={t("capture.time")}>
             {formatTime(live.elapsed)}
             <small>/ 105:00</small>
           </span>
           {session.mode === "real" && (
             <div
               className="volume-meter"
-              title={`真实麦克风音量 ${Math.round(live.level * 100)}%`}
+              title={t("capture.volume", { value: Math.round(live.level * 100) })}
             >
               <Volume2 size={16} />
               <div>
@@ -1058,14 +1047,14 @@ export function SessionView({
           {live.active ? (
             <button className="stop-button" onClick={() => live.stop()}>
               <Square size={16} fill="currentColor" />
-              {live.preparing ? "取消准备" : `停止${session.mode === "demo" ? "模拟" : "录音"}`}
+              {live.preparing ? t("capture.cancel") : t(session.mode === "demo" ? "capture.stopDemo" : "capture.stop")}
             </button>
           ) : (
             <button
               className="primary capture-start"
               disabled={
                 modelBusy || live.settling ||
-                live.connection !== "已连接" ||
+                live.connection !== "connected" ||
                 live.elapsed >= 105 * 60 * 1000
               }
               onClick={() => void live.start()}
@@ -1075,12 +1064,12 @@ export function SessionView({
               ) : (
                 <Mic size={18} />
               )}
-              <span>{session.mode === "demo" ? "开始模拟" : "开始录音"}</span>
+              <span>{t(session.mode === "demo" ? "capture.startDemo" : "capture.start")}</span>
             </button>
           )}
-          {live.connection !== "已连接" && !live.active && (
+          {live.connection !== "connected" && !live.active && (
             <button className="secondary" onClick={live.retry}>
-              重新连接
+              {t("capture.retry")}
             </button>
           )}
         </div>
@@ -1091,13 +1080,9 @@ export function SessionView({
       ) && (
         <details className="task-status">
           <summary>
-            后台任务与导出 ·{" "}
-            {
-              session.tasks.filter(
-                (t) => t.status === "failed" || t.status === "retry",
-              ).length
-            }{" "}
-            项需要关注
+            {t("sessionExtra.tasks", { count: session.tasks.filter(
+              (task) => task.status === "failed" || task.status === "retry",
+            ).length })}
           </summary>
           {session.tasks
             .filter(
@@ -1106,35 +1091,35 @@ export function SessionView({
                 t.status === "failed" ||
                 t.status === "retry",
             )
-            .map((t) => (
-              <p key={t.id}>
+            .map((task) => (
+              <p key={task.id}>
                 {(
                   {
-                    translate: "翻译",
-                    index_segment: "字幕索引",
-                    summarize: "阶段提取",
-                    reprocess: "会后校正",
-                    export: "导出",
+                    translate: t("sessionExtra.translate"),
+                    index_segment: t("sessionExtra.index_segment"),
+                    summarize: t("sessionExtra.summarize"),
+                    reprocess: t("sessionExtra.reprocess"),
+                    export: t("sessionExtra.export"),
                   } as Record<string, string>
-                )[t.kind] || t.kind}{" "}
+                )[task.kind] || task.kind}{" "}
                 ·{" "}
                 {(
                   {
-                    retry: "有限重试中",
-                    failed: "失败",
-                    completed: "已完成",
-                    pending: "排队中",
-                    running: "处理中",
+                    retry: t("sessionExtra.retry"),
+                    failed: t("sessionExtra.failed"),
+                    completed: t("sessionExtra.completed"),
+                    pending: t("sessionExtra.pendingTask"),
+                    running: t("sessionExtra.running"),
                   } as Record<string, string>
-                )[t.status] || t.status}
-                {t.error && `：${t.error}`}
-                {t.kind === "export" && t.status === "completed" && (
+                )[task.status] || task.status}
+                {task.error && `: ${t("common.error")}`}
+                {task.kind === "export" && task.status === "completed" && (
                   <a
                     className="text-button"
-                    href={`/api/sessions/${session.id}/exports/${t.id}/file`}
+                    href={`/api/sessions/${session.id}/exports/${task.id}/file`}
                     download
                   >
-                    下载报告
+                    {t("sessionExtra.download")}
                   </a>
                 )}
               </p>
@@ -1151,12 +1136,12 @@ export function SessionView({
         />
       )}
       {documentsOpen && (
-        <Dialog title="本会话资料" className="session-documents" close={() => setDocumentsOpen(false)}>
+        <Dialog title={t("sessionTools.documents")} className="session-documents" close={() => setDocumentsOpen(false)}>
             <div className="modal-title">
-              <h2>本会话资料</h2>
+              <h2>{t("sessionTools.documents")}</h2>
               <button
                 className="icon-button"
-                aria-label="关闭会话资料"
+                aria-label={t("sessionExtra.closeDocuments")}
                 onClick={() => setDocumentsOpen(false)}
               >
                 <X size={20} />
@@ -1170,14 +1155,14 @@ export function SessionView({
         </Dialog>
       )}
       {selectedSource?.kind === "sentence" && (
-        <div className="source-popover" role="dialog" aria-label="原文引用">
+        <div className="source-popover" role="dialog" aria-label={t("sessionExtra.quote")}>
           <div>
             <strong>
-              原文证据 · 版本 {selectedSource.source_revision || 1}
+              {t("sessionExtra.evidence", { revision: selectedSource.source_revision || 1 })}
             </strong>
             <button
               className="icon-button"
-              aria-label="关闭引用"
+              aria-label={t("sessionExtra.closeQuote")}
               onClick={() => setSelectedSource(null)}
             >
               <X size={16} />
@@ -1194,7 +1179,7 @@ export function SessionView({
                   setSelectedSource(null);
                 }}
               >
-                打开来源会话
+                {t("sessionExtra.openSource")}
               </button>
             )}
         </div>

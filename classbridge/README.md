@@ -1,5 +1,7 @@
 # ClassBridge · 语音理解工作台
 
+2026-11-27 P3.3：新增简体中文、English、한국어界面，支持登录页、顶部导航及偏好设置即时切换与账号持久化；界面语言独立于识别和字幕语言。实现、构建、测试范围及回退说明见 [前端国际化](docs/FRONTEND_I18N.md)。无需数据库迁移，部署需更新后端 API 并重新构建前端。
+
 2026-11-26 音频稳定性：千问100ms聚合、可配置分级缓冲、后台任务隔离及故障分类已完成 Mock 验证；浏览器仍20ms采音，Soniox协议不变。自动恢复未实现，开启时拒绝启动。配置、性能代价、测试、部署和回退见 [音频可靠性交付记录](docs/ASR_PIPELINE_RELIABILITY.md)。本轮没有重启现有服务或调用真实模型。
 
 面向韩英交替课堂、会议和访谈的私人语音理解应用。React / TypeScript / Vite 前端，FastAPI 后端，生产使用 PostgreSQL + pgvector、Redis / Celery、Nginx。项目独立放在 `classbridge/`，不覆盖其他网站。

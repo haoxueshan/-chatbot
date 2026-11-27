@@ -6,11 +6,13 @@ export const HEARTBEAT_INTERVAL_MS = 10_000;
 export const HEARTBEAT_TIMEOUT_MS = 45_000;
 const MAX_RETRIES = 6;
 
+export type ConnectionState = "connected" | "connecting" | "disconnected" | "reconnecting";
+
 interface Options {
   url: () => string;
   socket?: (url: string) => WebSocket;
   onSocket: (socket: WebSocket | null) => void;
-  onState: (state: string) => void;
+  onState: (state: ConnectionState) => void;
   onMessage: (data: string) => void;
   onLost: () => void;
   onNotice: (message: string) => void;
@@ -48,7 +50,7 @@ export function connectLive(options: Options) {
     options.onLost();
     if ([4001, 4401, 4403, 4404].includes(code)) {
       terminal = true;
-      options.onState("已断开");
+      options.onState("disconnected");
       options.onNotice(code === 4001
         ? "会话已在另一页面打开；此页面已停止连接。"
         : "连接被拒绝，请重新登录并检查会话权限。");
@@ -57,11 +59,11 @@ export function connectLive(options: Options) {
     if (message) options.onNotice(message);
     if (attempts < MAX_RETRIES) {
       attempts++;
-      options.onState("断线，恢复中");
+      options.onState("reconnecting");
       retry = setTimeout(connect, Math.min(15_000, 750 * 2 ** attempts));
     } else {
       terminal = true;
-      options.onState("已断开");
+      options.onState("disconnected");
       options.onNotice("无法连接服务端。已保存字幕不会丢失，请点击重新连接；若仍失败，请重新登录。");
     }
   };
@@ -83,7 +85,7 @@ export function connectLive(options: Options) {
     if (disposed || terminal) return;
     clearTimeout(retry);
     retry = undefined;
-    options.onState(attempts ? "正在恢复记录" : "连接中");
+    options.onState(attempts ? "reconnecting" : "connecting");
     let socket: WebSocket;
     try { socket = (options.socket || ((url) => new WebSocket(url)))(options.url()); }
     catch { lost(1006, "无法建立连接，请检查网络和访问地址。"); return; }
@@ -97,7 +99,7 @@ export function connectLive(options: Options) {
       if (!isCurrent()) return;
       clearTimeout(deadline);
       deadline = undefined;
-      options.onState("已连接");
+      options.onState("connected");
       options.onNotice("");
       // Rapid accept/close loops must still exhaust the retry budget.
       stable = setTimeout(() => { if (isCurrent()) attempts = 0; }, 30_000);

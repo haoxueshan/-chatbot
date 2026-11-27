@@ -4,6 +4,12 @@
   padding: 28px 32px;
   margin: auto;
 }
+.settings-card .secondary {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  height: auto;
+}
 .settings-card {
   background: var(--cb-panel);
   border: 1px solid var(--cb-border);

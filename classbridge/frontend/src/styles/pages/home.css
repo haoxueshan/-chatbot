@@ -64,6 +64,14 @@
   gap: 14px;
   min-width: 0;
 }
+.dashboard-action > span,
+.stat-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dashboard-action > span {
+  max-width: 100%;
+}
 .dashboard-action:hover {
   border-color: hsl(var(--ring));
   background: var(--cb-accent-soft);
@@ -217,6 +225,13 @@
   gap: 16px;
   flex-wrap: wrap;
   margin-top: 24px;
+}
+.dashboard-links > .ui-button {
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 @media (max-width: 1200px) {
   .dashboard-action {

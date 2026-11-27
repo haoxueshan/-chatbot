@@ -45,15 +45,15 @@ test("a stuck handshake times out and late callbacks cannot revive the old socke
   const staleOpen = old.onopen!, staleMessage = old.onmessage!;
   t.mock.timers.tick(CONNECT_TIMEOUT_MS);
   assert.equal(old.readyState, 3);
-  assert.equal(f.states.at(-1), "断线，恢复中");
+  assert.equal(f.states.at(-1), "reconnecting");
   assert.equal(f.lost(), 1);
   t.mock.timers.tick(1_500);
   assert.equal(f.sockets.length, 2);
   staleOpen(); staleMessage({ data: "old result" });
-  assert.equal(f.states.at(-1), "正在恢复记录");
+  assert.equal(f.states.at(-1), "reconnecting");
   assert.deepEqual(f.messages, []);
   f.sockets[1].open();
-  assert.equal(f.states.at(-1), "已连接");
+  assert.equal(f.states.at(-1), "connected");
   assert.deepEqual(f.sockets[1].sent, []); // Recovery never sends start/audio.
 });
 
@@ -64,7 +64,7 @@ test("handshake retries have a finite budget even when browsers emit no close ev
     if (i < 6) t.mock.timers.tick(15_000);
   }
   assert.equal(f.sockets.length, 7);
-  assert.equal(f.states.at(-1), "已断开");
+  assert.equal(f.states.at(-1), "disconnected");
   f.controller.resume();
   t.mock.timers.tick(120_000);
   assert.equal(f.sockets.length, 7);
@@ -74,7 +74,7 @@ test("foreground probing detects a silently broken open socket without restartin
   const f = fixture(t), socket = f.sockets[0];
   socket.open();
   f.controller.resume(); f.controller.resume();
-  assert.deepEqual(socket.sent.map(JSON.parse), [{ type: "ping" }]);
+  assert.deepEqual(socket.sent.map((data) => JSON.parse(data)), [{ type: "ping" }]);
   t.mock.timers.tick(HEARTBEAT_TIMEOUT_MS);
   assert.equal(f.lost(), 1);
   assert.equal(socket.readyState, 3);
@@ -106,7 +106,7 @@ test("replacement/auth rejection stays terminal on foreground and online events"
   f.controller.resume();
   t.mock.timers.tick(120_000);
   assert.equal(f.sockets.length, 1);
-  assert.equal(f.states.at(-1), "已断开");
+  assert.equal(f.states.at(-1), "disconnected");
 });
 
 test("rapid accept-close loops cannot reset the retry budget", (t) => {
@@ -117,5 +117,5 @@ test("rapid accept-close loops cannot reset the retry budget", (t) => {
     t.mock.timers.tick(15_000);
   }
   assert.equal(f.sockets.length, 7);
-  assert.equal(f.states.at(-1), "已断开");
+  assert.equal(f.states.at(-1), "disconnected");
 });

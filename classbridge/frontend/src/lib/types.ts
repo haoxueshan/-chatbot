@@ -210,6 +210,7 @@ export interface ChatReply {
   mode: Mode;
 }
 export interface Preferences {
+  ui_language?: import("../i18n").UILanguage;
   audio_runtime?: import("./audioRuntime").AudioRuntime;
   default_asr_profile_id?: string | null;
   aliyun_services_error?: { code:string;message:string } | null;

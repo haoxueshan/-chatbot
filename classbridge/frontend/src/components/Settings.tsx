@@ -1,5 +1,5 @@
 import { translationLanguages, translationLanguageLabel, formatTranslationTerms, parseTranslationTerms, type TargetLanguage } from "../lib/translationLanguages";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BookOpen,
   Check,
@@ -18,6 +18,8 @@ import type { Preferences } from "../lib/types";
 import { classroomPreset } from "../lib/classroomPreset";
 import { asrLanguageLabels, type ASRLanguageMode } from "../lib/asrLanguages";
 import { ASRModels } from "./ASRModels";
+import { LanguageSwitcher } from "./LanguageSwitcher";
+import { useI18n } from "../i18n/I18nProvider";
 export function Settings({
   preferences,
   save,
@@ -25,11 +27,19 @@ export function Settings({
   preferences: Preferences;
   save: (p: Preferences) => Promise<void>;
 }) {
+  const { t, language } = useI18n();
+  const [savedTarget, setSavedTarget] = useState(preferences.target_language);
   const [draft, setDraft] = useState(preferences),
     [terms, setTerms] = useState(""),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
+  const previousPreferences = useRef<Preferences | null>(null);
   useEffect(() => {
+    const { ui_language: _language, ...current } = preferences;
+    const { ui_language: _previousLanguage, ...previous } = previousPreferences.current || {};
+    previousPreferences.current = preferences;
+    // A locale-only server refresh must not discard unsaved settings or terms.
+    if (JSON.stringify(current) === JSON.stringify(previous)) return;
     setDraft(preferences);
     setTerms(formatTranslationTerms(preferences.terms));
   }, [preferences]);
@@ -39,9 +49,10 @@ export function Settings({
     try {
       const parsed = terms === formatTranslationTerms(preferences.terms) ? preferences.terms : parseTranslationTerms(terms);
       await save({ ...draft, terms: parsed });
-      setMessage(`偏好已保存 · 默认字幕翻译语言：${translationLanguageLabel(draft.target_language)}`);
+      setSavedTarget(draft.target_language);
+      setMessage("saved");
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败");
+      setMessage("failed");
     } finally {
       setBusy(false);
     }
@@ -51,18 +62,18 @@ export function Settings({
       <div className="settings-width">
         <div className="page-heading">
           <div>
-            <span className="eyebrow">工作空间偏好</span>
-            <h1>偏好设置</h1>
-            <p>让工作台适应你的阅读与学习习惯。</p>
+            <span className="eyebrow">{t("settings.eyebrow")}</span>
+            <h1>{t("navigation.settings")}</h1>
+            <p>{t("settings.intro")}</p>
           </div>
           <Button disabled={busy} onClick={() => void submit()}>
             <Save size={16} />
-            {busy ? "保存中…" : "保存偏好"}
+            {busy ? t("settings.saving") : t("settings.save")}
           </Button>
         </div>
-        <nav className="settings-navigation" aria-label="设置分组">
-          {[["appearance", "外观与阅读"], ["language", "语言与术语"], ["microphone", "麦克风"],
-            ["privacy", "音频与隐私"], ["services", "翻译与知识"], ["asr", "识别模型"]].map(([id, label]) => (
+        <nav className="settings-navigation" aria-label={t("settings.groups")}>
+          {[["appearance", t("settings.appearance")], ["language", t("settings.termsNav")], ["microphone", t("settings.microphone")],
+            ["privacy", t("settings.privacy")], ["services", t("settings.servicesNav")], ["asr", t("settings.asrNav")]].map(([id, label]) => (
             <button key={id} onClick={() => {
               const section = document.getElementById(`settings-${id}`);
               section?.focus({preventScroll: true});
@@ -72,23 +83,34 @@ export function Settings({
         </nav>
         {message && (
           <div role="status" className="info-box">
-            {message}
+            {t(message === "saved" ? "settings.savedNotice" : "settings.failedNotice", {
+              language: language === "zh-CN"
+                ? translationLanguageLabel(savedTarget)
+                : new Intl.DisplayNames([language], { type: "language" }).of(savedTarget || "zh-CN") || savedTarget || "zh-CN",
+            })}
           </div>
         )}
         <Card id="settings-appearance" tabIndex={-1} className="settings-card">
+          <div className="settings-row">
+            <div>
+              <strong>{t("settings.language")}</strong>
+              <small>{t("settings.languageDescription")}</small>
+            </div>
+            <LanguageSwitcher />
+          </div>
           <div className="settings-title">
             <span className="quick-icon purple">
               <SlidersHorizontal size={21} />
             </span>
             <div>
-              <h2>外观与阅读</h2>
-              <p>译文优先，保持清晰。</p>
+              <h2>{t("settings.appearance")}</h2>
+              <p>{t("settings.appearanceHint")}</p>
             </div>
           </div>
           <div className="settings-row">
             <div>
-              <strong>界面主题</strong>
-              <small>切换明暗显示，照顾不同的光线环境。</small>
+              <strong>{t("settings.theme")}</strong>
+              <small>{t("settings.themeHint")}</small>
             </div>
             <div className="segmented theme-choice">
               <button
@@ -96,25 +118,25 @@ export function Settings({
                 onClick={() => setDraft({ ...draft, theme: "light" })}
               >
                 <Sun size={15} />
-                浅色
+                {t("settings.light")}
               </button>
               <button
                 className={draft.theme === "dark" ? "active" : ""}
                 onClick={() => setDraft({ ...draft, theme: "dark" })}
               >
                 <Moon size={15} />
-                深色
+                {t("settings.dark")}
               </button>
             </div>
           </div>
           <div className="settings-row">
             <div>
-              <strong>翻译字幕字号</strong>
-              <small>18–44 px，可在大屏与平板舒适阅读。</small>
+              <strong>{t("settings.size")}</strong>
+              <small>{t("settings.sizeHint")}</small>
             </div>
             <div className="range-control">
               <input
-                aria-label="翻译字幕字号"
+                aria-label={t("settings.size")}
                 type="range"
                 min={18}
                 max={44}
@@ -130,13 +152,13 @@ export function Settings({
           <div className="subtitle-preview">
             <small>Learning begins with a question.</small>
             <p style={{ fontSize: draft.subtitle_size }}>
-              理解，从一个问题开始。
+              {t("settings.preview")}
             </p>
           </div>
           <label className="settings-row">
             <div>
-              <strong>默认显示原文</strong>
-              <small>韩语和英语原文保留，与译文对照。</small>
+              <strong>{t("settings.original")}</strong>
+              <small>{t("settings.originalHint")}</small>
             </div>
             <input
               className="switch"
@@ -154,8 +176,8 @@ export function Settings({
               <Languages size={21} />
             </span>
             <div>
-              <h2>语言与专业术语</h2>
-              <p>为语音识别提供课堂语言提示，目标语言翻译单独生成。</p>
+              <h2>{t("settings.terms")}</h2>
+              <p>{t("settings.termsHint")}</p>
             </div>
           </div>
           <button
@@ -163,17 +185,17 @@ export function Settings({
             className="secondary"
             onClick={() => setDraft(classroomPreset(draft))}
           >
-            应用韩英远场课堂预设（仍需点击保存）
+            {t("settings.preset")}
           </button>
           <label className="settings-row">
             <div>
-              <strong>语音识别语言提示</strong>
+              <strong>{t("settings.asrLanguage")}</strong>
               <small>
-                韩英课堂可选“韩语＋英语”；包含中文等语言时选“全部语言自动识别”。保存后下次开始录音生效。
+                {t("settings.asrHint")}
               </small>
             </div>
             <select
-              aria-label="语音识别语言提示"
+              aria-label={t("settings.asrLanguage")}
               value={draft.asr_language_mode || "auto"}
               onChange={(e) =>
                 setDraft({
@@ -182,26 +204,23 @@ export function Settings({
                 })
               }
             >
-              {Object.entries(asrLanguageLabels).map(([value, label]) => (
+              {Object.keys(asrLanguageLabels).map((value) => (
                 <option key={value} value={value}>
-                  {label}
+                  {t(value === "auto" ? "settings.asrAuto" : value === "ko_en" ? "settings.asrKoEn" : "settings.asrKo")}
                 </option>
               ))}
             </select>
           </label>
           <label className="settings-row">
-            <div><strong>默认字幕翻译语言</strong><small>默认语言用于新建会话，历史会话不会自动改变。</small></div>
-            <select aria-label="默认字幕翻译语言" value={draft.target_language || "zh-CN"} onChange={e=>setDraft({...draft,target_language:e.target.value as TargetLanguage})}>
-              {Object.entries(translationLanguages).map(([code,language])=><option key={code} value={code}>{language.label}</option>)}
+            <div><strong>{t("settings.target")}</strong><small>{t("settings.targetHint")}</small></div>
+            <select aria-label={t("settings.target")} value={draft.target_language || "zh-CN"} onChange={e=>setDraft({...draft,target_language:e.target.value as TargetLanguage})}>
+              {Object.entries(translationLanguages).map(([code, item])=><option key={code} value={code}>{language === "zh-CN" ? item.label : new Intl.DisplayNames([language], { type: "language" }).of(code) || item.label}</option>)}
             </select>
           </label>
           <label className="terms-label">
-            课程术语与人名
+            {t("settings.termTitle")}
             <small>
-              每行一个正确的韩语或英语词，也可以写“原文 =
-              译文”。无标签的译文只用于简体中文；其他语言可写 “[en] 작업기억 = working memory”。人名无需填写译文；请按实际课程填写。下次开始录音时生效。
-              识别热词含非 ASCII 字符时最多 15 个字符，纯英文最多 7
-              个单词；超长项仅用于翻译。
+              {t("settings.termHelp")}
             </small>
             <Textarea
               rows={6}
@@ -215,17 +234,16 @@ export function Settings({
             <div className="info-box" role="status">
               <div>
                 <strong>
-                  已保存词表：{preferences.asr_terms_status.enabled_count}{" "}
-                  个可用识别热词
+                  {t("settings.termCount", { count: preferences.asr_terms_status.enabled_count })}
                 </strong>
                 {!preferences.asr_terms_status.enabled_count && (
                   <p>
-                    当前没有可用热词。请填入本课经常识别错的词或人名的正确原文。
+                    {t("settings.termEmpty")}
                   </p>
                 )}
                 {preferences.asr_terms_status.skipped.map((item) => (
                   <p key={item.index}>
-                    第 {item.index + 1} 项未单独用作识别热词：{item.reason}
+                    {t("settings.termSkipped", { index: item.index + 1 })}: {item.reason}
                   </p>
                 ))}
               </div>
@@ -233,13 +251,13 @@ export function Settings({
           )}
           <label className="settings-row">
             <div>
-              <strong>识别热词强度</strong>
+              <strong>{t("settings.hotword")}</strong>
               <small>
-                人名、专业词可试用4；若其他词被错替换，降低强度或移除无关词。空词表时无效。
+                {t("settings.weightHelp")}
               </small>
             </div>
             <select
-              aria-label="识别热词强度"
+              aria-label={t("settings.hotword")}
               value={draft.asr_hotword_weight ?? 2}
               onChange={(e) =>
                 setDraft({
@@ -248,29 +266,29 @@ export function Settings({
                 })
               }
             >
-              <option value={2}>2 · 轻度</option>
-              <option value={3}>3 · 标准</option>
-              <option value={4}>4 · 加强</option>
+              <option value={2}>{t("settings.weightLight")}</option>
+              <option value={3}>{t("settings.weightNormal")}</option>
+              <option value={4}>{t("settings.weightStrong")}</option>
             </select>
           </label>
           <label className="terms-label">
-            当前课程背景（可选）
+            {t("settings.contextTitle")}
             <small>
-              最多400字。填写课程主题和正确原词、韩文人名，长词组也可放在这里。换课时请更新；仅写中文含义对韩语原词帮助有限。
+              {t("settings.contextHelp")}
             </small>
             <Textarea
-              aria-label="当前课程背景"
+              aria-label={t("settings.context")}
               rows={4}
               maxLength={400}
               value={draft.asr_context || ""}
               onChange={(e) =>
                 setDraft({ ...draft, asr_context: e.target.value })
               }
-              placeholder="例如：인지심리학 수업. 주요 용어: 작업기억, 인지부하. 请替换为本课真实内容。"
+              placeholder={t("settings.contextPlaceholder")}
             />
             <small>
               {Array.from(draft.asr_context || "").length} / 400 ·
-              示例不会自动加入模型请求
+              {t("settings.exampleHint")}
             </small>
           </label>
         </Card>
@@ -280,20 +298,19 @@ export function Settings({
               <ShieldCheck size={21} />
             </span>
             <div>
-              <h2>录音与麦克风</h2>
-              <p>你决定什么值得留下。</p>
+              <h2>{t("settings.recording")}</h2>
+              <p>{t("settings.recordingHint")}</p>
             </div>
           </div>
           <label className="settings-row">
             <div>
-              <strong>识别拾音场景</strong>
+              <strong>{t("settings.acoustic")}</strong>
               <small>
-                远距离教授讲话用远场（ASR
-                默认）；领夹麦或近距离话筒可测试近场。仅在下次开始录音时生效。
+                {t("settings.acousticHelp")}
               </small>
             </div>
             <select
-              aria-label="识别拾音场景"
+              aria-label={t("settings.acoustic")}
               value={draft.asr_acoustic_profile || "far"}
               onChange={(e) =>
                 setDraft({
@@ -302,20 +319,19 @@ export function Settings({
                 })
               }
             >
-              <option value="far">远场课堂 / 会议</option>
-              <option value="near">近距离麦克风</option>
+              <option value="far">{t("settings.far")}</option>
+              <option value="near">{t("settings.near")}</option>
             </select>
           </label>
           <label className="settings-row">
             <div>
-              <strong>浏览器音频处理</strong>
+              <strong>{t("settings.processing")}</strong>
               <small>
-                标准模式保持原有回声消除、降噪和自动增益；原声模式关闭浏览器的这些处理供
-                A/B 对比，可能更差，不能消除硬件处理。
+                {t("settings.processingHelp")}
               </small>
             </div>
             <select
-              aria-label="浏览器音频处理"
+              aria-label={t("settings.processing")}
               value={draft.audio_processing_mode || "standard"}
               onChange={(e) =>
                 setDraft({
@@ -325,8 +341,8 @@ export function Settings({
                 })
               }
             >
-              <option value="standard">标准（默认）</option>
-              <option value="natural">原声对照</option>
+              <option value="standard">{t("settings.standard")}</option>
+              <option value="natural">{t("settings.natural")}</option>
             </select>
           </label>
         </Card>
@@ -336,14 +352,14 @@ export function Settings({
               <ShieldCheck size={21} />
             </span>
             <div>
-              <h2>音频与隐私</h2>
-              <p>选择音频保留策略，默认只保存文字。</p>
+              <h2>{t("settings.privacy")}</h2>
+              <p>{t("settings.privacyHint")}</p>
             </div>
           </div>
           <label className="settings-row">
             <div>
-              <strong>新会话默认保留音频</strong>
-              <small>创建会话时仍可更改，仅在真实模式生效。</small>
+              <strong>{t("settings.retain")}</strong>
+              <small>{t("settings.retainHint")}</small>
             </div>
             <input
               className="switch"
@@ -356,15 +372,15 @@ export function Settings({
           </label>
           <div className="settings-row">
             <div>
-              <strong>音频保留期限</strong>
-              <small>由服务器管理员配置，到期后台清理。</small>
+              <strong>{t("settings.retention")}</strong>
+              <small>{t("settings.retentionHint")}</small>
             </div>
-            <span>{draft.audio_retention_days} 天</span>
+            <span>{t("settings.days", { count: draft.audio_retention_days })}</span>
           </div>
           <div className="info-box">
             <BookOpen size={17} />
             <span>
-              默认保存文字，不长期保存原始音频。会后校正生成新版本，并保留旧引用的可追溯性。
+              {t("settings.storageHelp")}
             </span>
           </div>
         </Card>
@@ -374,8 +390,8 @@ export function Settings({
               <Monitor size={21} />
             </span>
             <div>
-              <h2>阿里云翻译与知识服务</h2>
-              <p>仅显示服务器配置状态，不代表真实 API 已验证。</p>
+              <h2>{t("settings.services")}</h2>
+              <p>{t("settings.servicesHint")}</p>
             </div>
           </div>
           <div className="model-status">
@@ -383,14 +399,14 @@ export function Settings({
               {draft.api_key_configured && !draft.aliyun_services_error ? (
                 <>
                   <Check size={13} />
-                  已配置 · 尚未验证
+                  {t("settings.configured")}
                 </>
               ) : (
-                "真实模式尚未就绪"
+                t("settings.notReady")
               )}
             </span>
             <span className="tiny muted">
-              地域：{draft.region || "服务器未报告"}
+              {t("settings.region", { region: draft.region || t("settings.unreported") })}
             </span>
           </div>
           <div className="model-table">
@@ -398,12 +414,12 @@ export function Settings({
               <div key={name}>
                 <span>
                   {{
-                    asr: "流式语音识别",
-                    translation: "目标语言翻译",
-                    summary: "阶段提取",
-                    answer: "RAG 回答",
-                    embedding: "向量模型",
-                    rerank: "重排模型",
+                    asr: t("settings.modelASR"),
+                    translation: t("settings.modelTranslation"),
+                    summary: t("settings.modelSummary"),
+                    answer: t("settings.modelAnswer"),
+                    embedding: t("settings.modelEmbedding"),
+                    rerank: t("settings.modelRerank"),
                   }[name] || name}
                 </span>
                 <code>{value}</code>
@@ -411,33 +427,32 @@ export function Settings({
             ))}
           </div>
           <div className="config-checks">
-            <span>{draft.api_key_configured ? "✓" : "○"} 服务器 API 密钥</span>
+            <span>{draft.api_key_configured ? "✓" : "○"} {t("settings.serverKey")}</span>
             <span>
               {draft.workspace_configured
-                ? "✓ 业务空间"
+                ? `✓ ${t("settings.workspace")}`
                 : draft.api_key_configured && !draft.aliyun_services_error
-                  ? "✓ 已使用显式接入地址"
-                  : "○ 业务空间或接入地址"}
+                  ? `✓ ${t("settings.endpointConfigured")}`
+                  : `○ ${t("settings.workspaceOrEndpoint")}`}
             </span>
           </div>
           {draft.aliyun_services_error && (
             <p role="status" className="info-box">
-              {draft.aliyun_services_error.message}
+              {t("settings.notReady")}
             </p>
           )}
           <p className="tiny muted">
             DASHSCOPE_API_KEY
-            只应在服务器安全环境变量中配置。网页不会收集或保存模型密钥。模型可用性、权限和真实课堂效果需单独验证。
+            {t("settings.keyHelp")}
           </p>
         </Card>
         <div className="info-box">
-          单次录音上限为 105
-          分钟，这是应用限制，不是账户消费上限。请保持页面在前台；不保证锁屏或后台录音。
+          {t("settings.limitHelp")}
         </div>
         <ASRModels />
         <footer className="page-footer">
           <span>ClassBridge · v1.0</span>
-          <span>基于 Minomeet 前端视觉体系 · MIT</span>
+          <span>{t("settings.credit")}</span>
         </footer>
       </div>
     </div>

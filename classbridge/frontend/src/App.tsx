@@ -9,8 +9,10 @@ import { Settings } from "./components/Settings";
 import { ApiError, post, request } from "./lib/api";
 import type { Mode, Page, Preferences, Session, SessionFolder, User } from "./lib/types";
 import { FolderManager } from "./components/SessionFolders";
+import { I18nProvider, useI18n } from "./i18n/I18nProvider";
 
 const defaultPreferences: Preferences = {
+  ui_language: "zh-CN",
   asr_language_mode: "auto",
   theme: "light",
   subtitle_size: 24,
@@ -20,8 +22,12 @@ const defaultPreferences: Preferences = {
   terms: [],
 };
 export default function App() {
-  const [user, setUser] = useState<User | null>(null),
-    [authLoading, setAuthLoading] = useState(true),
+  const [user, setUser] = useState<User | null>(null);
+  return <I18nProvider userId={user?.id}><Workspace user={user} setUser={setUser} /></I18nProvider>;
+}
+function Workspace({ user, setUser }: { user: User | null; setUser: (user: User | null) => void }) {
+  const { t } = useI18n();
+  const [authLoading, setAuthLoading] = useState(true),
     [page, setPage] = useState<Page>("home"),
     [sessions, setSessions] = useState<Session[]>([]),
     [session, setSession] = useState<Session | null>(null),
@@ -193,9 +199,10 @@ export default function App() {
     return () => window.removeEventListener("hashchange", handle);
   }, [openSession]);
   const savePreferences = async (value: Preferences) => {
+    const { ui_language: _language, ...otherPreferences } = value;
     const next = await request<Preferences>("/settings", {
       method: "PATCH",
-      body: JSON.stringify(value),
+      body: JSON.stringify(otherPreferences),
     });
     setPreferences({ ...defaultPreferences, ...next });
   };
@@ -279,7 +286,7 @@ export default function App() {
     return (
       <div className="app-loading">
         <LoaderCircle className="spin" size={28} />
-        <p>正在打开你的工作台…</p>
+        <p>{t("common.opening")}</p>
       </div>
     );
   if (!user)
@@ -314,12 +321,12 @@ export default function App() {
           collapsed={collapsed}
           title={
             page === "home"
-              ? "工作台"
+              ? t("navigation.home")
               : page === "library"
-                ? "资料库"
+                ? t("navigation.library")
                 : page === "settings"
-                  ? "偏好设置"
-                  : session?.title || "实时会话"
+                  ? t("navigation.settings")
+                  : session?.title || t("navigation.live")
           }
           dark={preferences.theme === "dark"}
           toggle={() => {
@@ -339,14 +346,14 @@ export default function App() {
         {!online && (
           <div className="offline-banner" role="alert">
             <WifiOff size={15} />
-            网络已断开。已保存内容不会丢失，实时采集需要连接服务器。
+            {t("common.offline")}
           </div>
         )}
         <main className="main-content">
           {loading && (
             <div className="view-loading">
               <LoaderCircle className="spin" />
-              正在读取会话…
+              {t("common.loadingSession")}
             </div>
           )}
           {page === "home" && (

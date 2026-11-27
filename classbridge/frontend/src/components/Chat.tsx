@@ -7,6 +7,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { post, request } from "../lib/api";
+import { useI18n } from "../i18n/I18nProvider";
 import type { ChatReply, Citation, Document, Mode } from "../lib/types";
 interface Turn extends ChatReply {
   question: string;
@@ -20,6 +21,7 @@ export function Chat({
   mode: Mode;
   onCitation: (c: Citation) => void;
 }) {
+  const { t: text } = useI18n();
   const [question, setQuestion] = useState(""),
     [scope, setScope] = useState(sessionId ? "session" : "history"),
     [turns, setTurns] = useState<Turn[]>([]),
@@ -69,7 +71,7 @@ export function Chat({
       setTurns((old) => [...old, { question: value.trim(), ...answer }]);
     } catch (err) {
       setQuestion(value);
-      setError(err instanceof Error ? err.message : "回答失败");
+      setError("failed");
     } finally {
       setBusy(false);
     }
@@ -78,20 +80,20 @@ export function Chat({
     <div className="chat-panel">
       <div className="chat-scope">
         <label>
-          检索范围
+          {text("chat.scope")}
           <select
-            aria-label="问答检索范围"
+            aria-label={text("chat.scopeLabel")}
             value={scope}
             onChange={(e) => setScope(e.target.value)}
           >
             {sessionId && (
               <>
-                <option value="session">当前完整会话</option>
-                <option value="recent">最近课堂内容</option>
+                <option value="session">{text("chat.session")}</option>
+                <option value="recent">{text("chat.recent")}</option>
               </>
             )}
-            <option value="documents">选定资料</option>
-            <option value="history">我的历史会话</option>
+            <option value="documents">{text("chat.documents")}</option>
+            <option value="history">{text("chat.history")}</option>
           </select>
         </label>
         {scope === "documents" && (
@@ -114,7 +116,7 @@ export function Chat({
                 </label>
               ))
             ) : (
-              <p className="tiny muted">请先在资料库上传讲义。</p>
+              <p className="tiny muted">{text("chat.upload")}</p>
             )}
           </div>
         )}
@@ -125,16 +127,16 @@ export function Chat({
             <span className="chat-spark">
               <Sparkles size={26} />
             </span>
-            <h3>把问题，交给证据</h3>
+            <h3>{text("chat.heading")}</h3>
             <p>
-              结合原文与讲义回答，
+              {text("chat.intro")}
               <br />
-              每个引用都能回到来源。
+              {text("chat.evidence")}
             </p>
             {[
-              "刚才的核心观点是什么？",
-              "解释课堂中提到的关键概念",
-              "有哪些需要继续思考的问题？",
+              text("chat.suggestion1"),
+              text("chat.suggestion2"),
+              text("chat.suggestion3"),
             ].map((s) => (
               <button key={s} onClick={() => void ask(s)} disabled={busy}>
                 <MessageSquare size={14} />
@@ -149,7 +151,7 @@ export function Chat({
             <div className="assistant-heading">
               <Sparkles size={15} />
               ClassBridge{" "}
-              {t.mode === "demo" && <span className="badge amber">模拟</span>}
+              {t.mode === "demo" && <span className="badge amber">{text("chat.demo")}</span>}
             </div>
             <div className="answer-text">{t.answer}</div>
             {!!t.citations?.length && (
@@ -164,8 +166,8 @@ export function Chat({
                     <span>
                       [{c.label || `E${index + 1}`}]{" "}
                       {c.kind === "document"
-                        ? `资料 · ${c.location || (c.page ? `第 ${c.page} 页` : "原文位置")}`
-                        : `原文 · v${c.source_revision || 1}`}
+                        ? text("chat.document", { location: c.location || (c.page ? text("chat.page", { page: c.page }) : text("chat.location")) })
+                        : text("chat.source", { revision: c.source_revision || 1 })}
                       <small>{c.quote}</small>
                     </span>
                   </button>
@@ -177,7 +179,7 @@ export function Chat({
         {busy && (
           <div className="chat-working">
             <LoaderCircle size={16} className="spin" />
-            正在检索证据与整理回答…
+            {text("chat.busy")}
           </div>
         )}
         <div ref={end} />
@@ -191,13 +193,13 @@ export function Chat({
       >
         {error && (
           <p className="error-box" role="alert">
-            {error}
+            {text("chat.failed")}
           </p>
         )}
         <div>
           <textarea
-            aria-label="输入问题"
-            placeholder="关于这节课，你想知道什么？"
+            aria-label={text("chat.input")}
+            placeholder={text("chat.placeholder")}
             rows={2}
             maxLength={4000}
             value={question}
@@ -215,7 +217,7 @@ export function Chat({
           />
           <button
             className="send-button"
-            aria-label="发送问题"
+            aria-label={text("chat.send")}
             disabled={
               busy ||
               !question.trim() ||
@@ -226,9 +228,7 @@ export function Chat({
           </button>
         </div>
         <small>
-          {mode === "demo"
-            ? "模拟问答 · 不调用付费 API"
-            : "回答仅作辅助，请核对原文证据"}
+          {text(mode === "demo" ? "chat.demoHint" : "chat.disclaimer")}
         </small>
       </form>
     </div>

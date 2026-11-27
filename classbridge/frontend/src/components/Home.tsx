@@ -21,7 +21,10 @@ import {
   Settings2,
   Upload,
 } from "lucide-react";
-import { formatDate, formatTime } from "../lib/api";
+import { formatTime } from "../lib/api";
+import { formatDate } from "../i18n";
+import { safeDiagnostic } from "../i18n/errors";
+import { useI18n } from "../i18n/I18nProvider";
 import type { Mode, Session } from "../lib/types";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
@@ -55,6 +58,7 @@ export function Home({
   library: () => void;
   settings: () => void;
 }) {
+  const { t, language } = useI18n();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [destination, setDestination] = useState("");
   useEffect(() => { setSelectedIds([]); }, [search, folderNavigation?.selected]);
@@ -73,34 +77,34 @@ export function Home({
       <div className="page-width">
         <div className="page-heading">
           <div>
-            <span className="eyebrow">工作台</span>
-            <h1>欢迎回来</h1>
-            <p>开始一段记录，或继续整理你的课堂与会议。</p>
+            <span className="eyebrow">{t("navigation.home")}</span>
+            <h1>{t("home.welcome")}</h1>
+            <p>{t("home.intro")}</p>
           </div>
           <Button variant="secondary" onClick={library}>
             <Upload size={17} />
-            导入资料
+            {t("home.import")}
           </Button>
         </div>
-        <section className="dashboard-actions" aria-label="创建会话类型">
+        <section className="dashboard-actions" aria-label={t("home.types")}>
           {[
             {
               kind: "classroom",
               icon: GraduationCap,
-              title: "新建课堂录音",
-              text: "双语字幕与课堂重点",
+              title: t("home.classroomNew"),
+              text: t("home.classroomHint"),
             },
             {
               kind: "meeting",
               icon: Users,
-              title: "新建会议记录",
-              text: "讨论内容与行动事项",
+              title: t("home.meetingNew"),
+              text: t("home.meetingHint"),
             },
             {
               kind: "interview",
               icon: MessagesSquare,
-              title: "新建访谈",
-              text: "保留原话与对话线索",
+              title: t("home.interviewNew"),
+              text: t("home.interviewHint"),
             },
           ].map(({ kind, icon: Icon, title, text }) => (
             <button
@@ -119,55 +123,53 @@ export function Home({
             </button>
           ))}
         </section>
-        <section className="stat-grid" aria-label="会话统计">
+        <section className="stat-grid" aria-label={t("home.stats")}>
           <Card className="stat-card">
             <span>
               <FileText size={16} />
-              {search ? "匹配会话" : "已加载会话"}
+              {t(search ? "home.matches" : "home.loaded")}
             </span>
             <strong>
-              {sessions.length}
-              <small> 个</small>
+              {t("sessions.count", { count: sessions.length })}
             </strong>
-            <p>来自当前会话列表</p>
+            <p>{t("home.fromList")}</p>
           </Card>
           <Card className="stat-card">
             <span>
               <Clock size={16} />
-              累计采音时长
+              {t("home.duration")}
             </span>
             <strong>
               {Math.floor(total / 60000)}
-              <small> 分钟</small>
+              <small>{t("home.minutes")}</small>
             </strong>
-            <p>{search ? "当前搜索结果" : "当前列表"} · 不含暂停间隔</p>
+            <p>{t(search ? "home.searchResults" : "home.currentList")} · {t("home.excludesPauses")}</p>
           </Card>
           <Card className="stat-card">
             <span>
               <Mic size={16} />
-              真实模式会话
+              {t("home.realSessions")}
             </span>
             <strong>
-              {realCount}
-              <small> 个</small>
+              {t("sessions.count", { count: realCount })}
             </strong>
-            <p>另有 {sessions.length - realCount} 个模拟演示</p>
+            <p>{t("home.demoCount", { count: sessions.length - realCount })}</p>
           </Card>
         </section>
-        <section className="recent-section" aria-label="历史会话">
+        <section className="recent-section" aria-label={t("home.history")}>
           {folderNavigation && <FolderNavigation {...folderNavigation} />}
           <div className="section-heading">
             <div>
               <h2>
-                {folderNavigation?.selected === "unfiled" ? "未分类" : folderNavigation?.folders.find(f => f.id === folderNavigation.selected)?.name || "最近会话"} <span className="count-pill">{sessions.length}</span>
+                {folderNavigation?.selected === "unfiled" ? t("folders.unfiled") : folderNavigation?.folders.find(f => f.id === folderNavigation.selected)?.name || t("sessions.recent")} <span className="count-pill">{sessions.length}</span>
               </h2>
-              <p>打开已保存的字幕、摘要与资料。</p>
+              <p>{t("home.openSaved")}</p>
             </div>
             <label className="search-field">
               <Search size={17} />
               <Input
-                aria-label="搜索会话与字幕"
-                placeholder="搜索会话与字幕…"
+                aria-label={t("home.search")}
+                placeholder={t("home.searchPlaceholder")}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
@@ -175,7 +177,7 @@ export function Home({
                 <Button
                   size="icon"
                   variant="ghost"
-                  aria-label="清除搜索"
+                  aria-label={t("home.clearSearch")}
                   onClick={() => setSearch("")}
                 >
                   <X size={14} />
@@ -184,47 +186,47 @@ export function Home({
             </label>
           </div>
           {folderNavigation && moveSessions && sessions.length > 0 && (
-            <div className={`folder-batch-actions${visibleIds.length ? " has-selection" : ""}`} role="group" aria-label="批量移动会话">
+            <div className={`folder-batch-actions${visibleIds.length ? " has-selection" : ""}`} role="group" aria-label={t("home.batchMove")}>
               <label>
-                <input type="checkbox" aria-label="选择前100个会话"
+                <input type="checkbox" aria-label={t("home.select100")}
                   disabled={batchDisabled}
                   checked={visibleIds.length > 0 && sessions.slice(0, 100).every(s => visibleIds.includes(s.id))}
                   onChange={e => setSelectedIds(e.target.checked ? sessions.slice(0, 100).map(s => s.id) : [])} />
-                选择当前列表（最多100个）
+                {t("home.selectList")}
               </label>
-              <span role="status">{visibleIds.length ? `已选 ${visibleIds.length} 个` : "选择会话后可批量移动"}</span>
+              <span role="status">{visibleIds.length ? t("home.selected", { count: visibleIds.length }) : t("home.selectHint")}</span>
               {visibleIds.length > 0 && <>
-              <select aria-label="批量移动目标文件夹" value={destination} disabled={batchDisabled}
+              <select aria-label={t("home.destination")} value={destination} disabled={batchDisabled}
                 onChange={e => setDestination(e.target.value)}>
-                <option value="">未分类</option>
+                <option value="">{t("folders.unfiled")}</option>
                 {folderNavigation.folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
               </select>
               <Button disabled={batchDisabled || !visibleIds.length} onClick={async () => {
                 if (await moveSessions(visibleIds, destination)) setSelectedIds([]);
-              }}>移动所选会话</Button>
+              }}>{t("home.moveSelected")}</Button>
               <Button variant="ghost" disabled={batchDisabled} onClick={e => {
                 e.currentTarget.closest('.folder-batch-actions')?.querySelector<HTMLInputElement>('input')?.focus();
                 setSelectedIds([]);
-              }}>取消选择</Button>
+              }}>{t("home.deselect")}</Button>
               </>}
             </div>
           )}
           {sessions.length ? (
             <div className="session-list">
               <div className="session-columns" aria-hidden="true">
-                <span>会话名称 / 类型</span>
-                <span>模式</span>
-                <span>状态</span>
+                <span>{t("home.nameType")}</span>
+                <span>{t("home.mode")}</span>
+                <span>{t("home.status")}</span>
               </div>
               {sessions.map((session) => (
                 <div key={session.id} className={`session-entry${visibleIds.includes(session.id) ? " is-selected" : ""}`}>
                 {moveSessions && <label className="session-select">
-                  <input type="checkbox" aria-label={`选择会话：${session.title}`}
+                  <input type="checkbox" aria-label={t("home.selectSession", { title: session.title })}
                     checked={visibleIds.includes(session.id)}
                     disabled={batchDisabled || (!visibleIds.includes(session.id) && visibleIds.length >= 100)}
                     onChange={e => setSelectedIds(e.target.checked
                       ? [...visibleIds, session.id] : visibleIds.filter(id => id !== session.id))} />
-                  <span className="sr-only">选择</span>
+                  <span className="sr-only">{t("home.select")}</span>
                 </label>}
                 <button
                   className="session-row"
@@ -242,30 +244,26 @@ export function Home({
                   <span className="session-title">
                     <strong>{session.title}</strong>
                     <small>
-                      {formatDate(session.created_at)}
+                      {formatDate(language, session.created_at)}
                       <span>·</span>
                       <Clock size={12} />
                       {formatTime(session.captured_ms ?? session.duration_ms)}
                       <span>·</span>
-                      {session.kind === "meeting"
-                        ? "会议"
-                        : session.kind === "interview"
-                          ? "访谈"
-                          : "课堂"}
+                      {t(session.kind === "meeting" ? "home.meeting" : session.kind === "interview" ? "home.interview" : "home.classroom")}
                     </small>
                   </span>
                   <Badge className={session.mode === "demo" ? "amber" : "blue"}>
-                    {session.mode === "demo" ? "模拟演示" : "真实模式"}
+                    {t(session.mode === "demo" ? "home.demo" : "home.real")}
                   </Badge>
                   <span className="row-state">
                     {(
                       {
-                        recording: "录音中",
-                        stopped: "已停止",
-                        idle: "待开始",
-                        completed: "已完成",
-                        processing: "处理中",
-                        failed: "处理失败",
+                        recording: t("home.recording"),
+                        stopped: t("home.stopped"),
+                        idle: t("home.idle"),
+                        completed: t("home.completed"),
+                        processing: t("home.processing"),
+                        failed: t("home.failed"),
                       } as Record<string, string>
                     )[session.status] || session.status}
                   </span>
@@ -274,14 +272,14 @@ export function Home({
                 {folderNavigation && moveSession && <details className="session-row-tools"
                   onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) e.currentTarget.open = false; }}
                   onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.currentTarget.open = false; e.currentTarget.querySelector("summary")?.focus(); } }}>
-                  <summary aria-label={`会话操作：${session.title}`} title="会话操作"><span aria-hidden="true">•••</span></summary>
+                  <summary aria-label={t("home.actionsTitle", { title: session.title })} title={t("home.actions")}><span aria-hidden="true">•••</span></summary>
                   <label className="session-move">
-                  移动到
-                  <select aria-label={`移动会话：${session.title}`}
+                  {t("home.moveTo")}
+                  <select aria-label={t("home.moveSession", { title: session.title })}
                     value={session.folder_id || ""}
                     disabled={moving || folderNavigation.disabled}
                     onChange={e => void moveSession(session.id, e.target.value)}>
-                    <option value="">未分类</option>
+                    <option value="">{t("folders.unfiled")}</option>
                     {folderNavigation.folders.map(folder =>
                       <option key={folder.id} value={folder.id}>{folder.name}</option>)}
                   </select>
@@ -292,16 +290,14 @@ export function Home({
           ) : (
             <Card className="empty-state">
               <FileText size={28} />
-              <h3>{search ? "未找到相关会话" : folderNavigation?.selected ? "当前分类暂无会话" : "还没有会话"}</h3>
+              <h3>{t(search ? "home.noMatches" : folderNavigation?.selected ? "home.emptyCategory" : "home.empty")}</h3>
               <p>
-                {search
-                  ? "当前分类中没有匹配结果，可清除搜索或切换到全部会话。"
-                  : "从模拟演示开始体验，不调用付费 API。"}
+                {t(search ? "home.noMatchesHint" : "home.demoHint")}
               </p>
               {!search && (
                 <Button onClick={() => create()}>
                   <Plus size={16} />
-                  创建会话
+                  {t("home.create")}
                 </Button>
               )}
             </Card>
@@ -310,18 +306,18 @@ export function Home({
         <div className="dashboard-links">
           <Button variant="secondary" onClick={library}>
             <BookOpen size={16} />
-            资料库与知识来源
+            {t("home.library")}
             <ArrowRight size={15} />
           </Button>
           <Button variant="ghost" onClick={settings}>
             <Settings2 size={16} />
-            语言、麦克风与阅读偏好
+            {t("home.preferences")}
           </Button>
         </div>
         <footer className="page-footer">
           <span>
             <ShieldCheck size={14} />
-            私人工作空间 · 默认只保存文字
+            {t("home.private")}
           </span>
           <span>ClassBridge</span>
         </footer>
@@ -351,6 +347,7 @@ export function NewSession({
   defaultTarget?: TargetLanguage;
   retention?: number;
 }) {
+  const { t } = useI18n();
   const [kind, setKind] = useState(initial),
     [title, setTitle] = useState(""),
     [mode, setMode] = useState<Mode>("demo"),
@@ -358,13 +355,14 @@ export function NewSession({
     [target, setTarget] = useState<TargetLanguage>(defaultTarget),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [errorDetail, setErrorDetail] = useState("");
   const {profiles}=useASRProfiles();
   const [asrProfile,setASRProfile]=useState("");
   useEffect(()=>{if(!asrProfile){const profile=profiles.find(p=>p.is_default && p.enabled && p.validation.valid);if(profile)setASRProfile(profile.id);}},[profiles,asrProfile]);
   return (
     <Dialog
-      title="新建会话"
-      description="选择会话类型、模式和音频保留策略"
+      title={t("sessions.new")}
+      description={t("newSession.description")}
       close={close}
       busy={busy}
     >
@@ -374,23 +372,24 @@ export function NewSession({
         </span>
         <button
           className="icon-button"
-          aria-label="关闭"
+          aria-label={t("newSession.close")}
           disabled={busy}
           onClick={close}
         >
           <X size={20} />
         </button>
       </div>
-      <h2 aria-hidden="true">新建会话</h2>
-      <p className="muted">先选择会话模式，准备好后再点击开始。</p>
+      <h2 aria-hidden="true">{t("sessions.new")}</h2>
+      <p className="muted">{t("newSession.hint")}</p>
       <form
         onSubmit={async (e) => {
           e.preventDefault();
           if (busy) return;
-          if (mode === "demo" && target !== "zh-CN") { setError("模拟演示仅支持简体中文，请选择真实课堂或简体中文。"); return; }
-          if (mode === "real" && !profiles.some(p=>p.id===asrProfile && p.enabled && p.validation.valid)) {setError("请选择已启用且配置有效的 ASR 模型。");return;}
+          if (mode === "demo" && target !== "zh-CN") { setError("demo"); return; }
+          if (mode === "real" && !profiles.some(p=>p.id===asrProfile && p.enabled && p.validation.valid)) {setError("model");return;}
           setBusy(true);
           setError("");
+          setErrorDetail("");
           try {
             await submit({
               title:
@@ -403,7 +402,8 @@ export function NewSession({
               ...(mode==="real"?{asr_profile_id:asrProfile}:{}),
             });
           } catch (err) {
-            setError(err instanceof Error ? err.message : "创建失败");
+            setError("failed");
+            setErrorDetail(safeDiagnostic(err instanceof Error ? err.message : ""));
             setBusy(false);
           }
         }}
@@ -412,9 +412,9 @@ export function NewSession({
           {mode==="real" && <ASRSelector value={asrProfile} onChange={setASRProfile} disabled={busy}/>}
           <div className="segmented">
             {[
-              ["classroom", "课堂"],
-              ["meeting", "会议"],
-              ["interview", "访谈"],
+              ["classroom", t("home.classroom")],
+              ["meeting", t("home.meeting")],
+              ["interview", t("home.interview")],
             ].map(([k, t]) => (
               <button
                 type="button"
@@ -427,13 +427,13 @@ export function NewSession({
             ))}
           </div>
           <label>
-            会话名称
+            {t("newSession.name")}
             <Input
               autoFocus
               maxLength={160}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="例如：认知科学 · 第三讲"
+              placeholder={t("newSession.placeholder")}
             />
           </label>
           <div className="mode-choices">
@@ -443,11 +443,11 @@ export function NewSession({
               onClick={() => setMode("demo")}
             >
               <Sparkles size={20} />
-              <strong>模拟演示</strong>
+              <strong>{t("home.demo")}</strong>
               <small>
-                不调用付费 API
+                {t("newSession.noPaid")}
                 <br />
-                不使用麦克风
+                {t("newSession.noMic")}
               </small>
             </button>
             <button
@@ -456,22 +456,22 @@ export function NewSession({
               onClick={() => setMode("real")}
             >
               <Mic size={20} />
-              <strong>真实课堂</strong>
+              <strong>{t("newSession.real")}</strong>
               <small>
-                使用麦克风
+                {t("newSession.mic")}
                 <br />
-                需服务器配置模型密钥
+                {t("newSession.keys")}
               </small>
             </button>
           </div>
           <label>
-            字幕翻译目标语言
-            <select aria-label="字幕翻译目标语言" value={target} onChange={e=>setTarget(e.target.value as TargetLanguage)}>
+            {t("newSession.target")}
+            <select aria-label={t("newSession.target")} value={target} onChange={e=>setTarget(e.target.value as TargetLanguage)}>
               {Object.entries(translationLanguages).map(([code,language])=><option key={code} value={code}>{language.label}</option>)}
             </select>
-            <small>创建后固定用于本会话，修改偏好不会改变历史会话。</small>
+            <small>{t("newSession.fixed")}</small>
           </label>
-          {mode === "demo" && <p role="status">模拟演示仅支持简体中文；其他目标语言请选择真实课堂。模拟模式不调用付费 API。</p>}
+          {mode === "demo" && <p role="status">{t("newSession.demoHint")}</p>}
           <label className="checkbox-label">
             <input
               type="checkbox"
@@ -480,22 +480,23 @@ export function NewSession({
               onChange={(e) => setRetain(e.target.checked)}
             />
             <span>
-              保留音频用于会后整理
+              {t("newSession.retain")}
               <small>
                 {mode === "demo"
-                  ? "模拟模式不保存音频"
-                  : `私有保存，保留 ${retention} 天后自动清理。默认仅保存文字。`}
+                  ? t("newSession.noAudio")
+                  : t("newSession.retention", { days: retention })}
               </small>
             </span>
           </label>
         </fieldset>
         {error && (
           <div className="error-box" role="alert">
-            {error}
+            {t(error === "demo" ? "newSession.demoError" : error === "model" ? "newSession.modelError" : "newSession.failed")}
+            {error === "failed" && errorDetail && <details><summary>{t("newSession.details")}</summary>{errorDetail}</details>}
           </div>
         )}
         <Button type="submit" className="full" disabled={busy || (mode === "demo" && target !== "zh-CN")}>
-          {busy ? "正在创建…" : "创建会话"}
+          {t(busy ? "newSession.busy" : "home.create")}
           <ArrowRight size={17} />
         </Button>
       </form>
