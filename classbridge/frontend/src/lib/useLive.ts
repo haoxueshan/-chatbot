@@ -22,6 +22,9 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
   const [active, setActive] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [settling, setSettling] = useState(false);
+  const [flushing, setFlushing] = useState(false);
+  const flushGeneration = useRef<number | null>(null);
+  const captureCutoff = useRef<number | null>(null);
   const [level, setLevel] = useState(0);
   const [inputPeak, setInputPeak] = useState(0);
   const [audioQuality,setAudioQuality]=useState<AudioQuality>();
@@ -60,6 +63,8 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
   saved.current = onSaved;
   const stop = useCallback((reason?: string) => {
     generation.current++;
+    flushGeneration.current = null;
+    setFlushing(false);
     setEffectiveASR(undefined);
     clearTimeout(readyTimer.current);
     setPreparing(false);
@@ -70,7 +75,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     setLevel(0);
     setInputPeak(0);
     setAudioQuality(undefined);
-    total.current += started.current ? Date.now() - started.current : 0;
+    total.current += started.current ? (captureCutoff.current ?? Date.now()) - started.current : 0;
     started.current = 0;
     setElapsed(total.current);
     const hadStarted = startSent.current;
@@ -96,6 +101,30 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     void wake.current?.release();
     wake.current = null;
   }, []);
+  const finish = useCallback(() => {
+    if (flushGeneration.current !== null) return;
+    if (!activeRef.current) return;
+    if (!audio.current || !started.current || !startSent.current) { stop(); return; }
+    const current = generation.current;
+    const socket = ws.current;
+    const capture = audio.current;
+    flushGeneration.current = current;
+    captureCutoff.current = Date.now();
+    setFlushing(true);
+    setSettling(true);
+    void capture.finish().then((result) => {
+      if (generation.current !== current || flushGeneration.current !== current) return;
+      if (result.status !== "complete" && socket === ws.current && socket?.readyState === WebSocket.OPEN) {
+        // Structured diagnostic, localized through the existing gap renderer.
+        try { socket.send(JSON.stringify({type: "capture.gap", reason: "audio_flush_uncertain",
+          duration_ms: null, capture_id: captureRequest.current,
+          incident_id: `${captureRequest.current}:flush`, browser_diagnostics: {
+            ...browserMetrics.current, flush_status: result.status,
+          }})); } catch { /* stop() handles a closed transport */ }
+      }
+      stop(); // All accepted port frames have already reached socket.send().
+    });
+  }, [stop]);
   useEffect(() => {
     if (!activeRef.current) {
       total.current = session.captured_ms ?? session.duration_ms;
@@ -237,6 +266,8 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
           ) {
             if (e.diagnostics) setHealth(e.diagnostics);
             generation.current++;
+            flushGeneration.current = null;
+            setFlushing(false);
             captureRequest.current = null;
             activeStream.current = null;
             setEffectiveASR(undefined);
@@ -248,7 +279,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
             activeRef.current = false;
             setActive(false);
             setLevel(0);
-            total.current += started.current ? Date.now() - started.current : 0;
+            total.current += started.current ? (captureCutoff.current ?? Date.now()) - started.current : 0;
             started.current = 0;
             void wake.current?.release();
             wake.current = null;
@@ -305,7 +336,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     const timer = setInterval(() => {
       if (activeRef.current) {
         const duration =
-          total.current + (started.current ? Date.now() - started.current : 0);
+          total.current + (started.current ? (captureCutoff.current ?? Date.now()) - started.current : 0);
         setElapsed(duration);
         setQueue(Math.ceil((ws.current?.bufferedAmount || 0) / 640));
         const buffered=(ws.current?.bufferedAmount || 0)/32;
@@ -352,6 +383,9 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     activeRef.current = true;
     setActive(true);
     setPreparing(session.mode === "real");
+    captureCutoff.current = null;
+    flushGeneration.current = null;
+    setFlushing(false);
     const requestGeneration = ++generation.current;
     captureRequest.current = `${requestGeneration}:${Date.now()}`;
     activeStream.current = null;
@@ -436,6 +470,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     active,
     preparing,
     settling,
+    flushing,
     level,
     inputPeak,
     audioQuality,
@@ -455,7 +490,7 @@ export function useLive(session: Session, onSaved: () => void, audioOptions: Aud
     gaps,
     latency,
     start,
-    stop,
+    stop: finish,
     retry: () => setReconnect((x) => x + 1),
     clear: (clearedSeq = sequence.current) => {
       sequence.current = Math.max(sequence.current,clearedSeq);

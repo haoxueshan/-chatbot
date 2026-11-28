@@ -1,5 +1,16 @@
 # 实时录音中断排查
 
+## P4 更新（2026-11-27）
+
+正常停止先显示「正在发送录音尾帧」，等待 AudioWorklet flush 确认后才发送 stop。默认浏览器等待上限 500ms，超时/取消会保存不确定性提示；不能把该状态理解成音频已完整排空。断线、麦克风故障和服务器提前停止仍走紧急清理，不等待无限 flush。
+
+临时字幕结束时间显示 `?` 表示未知，`≈` 表示词级估计，均不是正式证据。protocol_error 不把此前 partial 定稿；source_storage_failed 仍安全停止并保留未确认数据。空 final/未知事件/冲突 final 可查看 empty_final_events、unknown_provider_events、final_conflicts 计数。
+
+诊断增加 last_audio_sent_age_ms、last_provider_event_age_ms、last_provider_heartbeat_age_ms、last_asr_partial_age_ms、last_asr_final_age_ms、last_asr_transcript_age_ms：单位 ms，null 表示没有观测值。recognition_stall_suspected 需要音频持续、能量非低、积压小、心跳新鲜且长期无文本，只是提示，背景噪声也可能触发；不会自动重连/重放。ASR_STALL_WARNING_SECONDS 默认 20。恢复安全门禁未移除。
+
+完整验证与回退见 [P4 报告](ASR_P4_VALIDATION.md)。
+
+
 ## 2026-11-26：先区分积压、丢失和不确定
 
 新版本查看登录后的 `/api/settings` → `audio_runtime` 及录音ready快照。默认浏览器/服务器/WAV预算为8秒，服务器警告1.5秒、高水位3秒；旧前端仍可能在2秒停止，升级后需刷新。`current_send_wait_ms`描述当前卡住的发送，旧`send_wait_ms`只描述上一条；发送完成不等于模型已识别。

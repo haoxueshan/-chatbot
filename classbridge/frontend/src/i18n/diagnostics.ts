@@ -1,4 +1,5 @@
 export const diagnosticsZh = {
+  "diagnostics.recognition_stall_suspected": "音频和心跳仍在传输，但长时间没有新原文。这是诊断提示，不能确认模型故障。",
   "diagnostics.incident.audio_missing": "采集缺口",
   "diagnostics.incident.storage_failed": "保存异常",
   "diagnostics.incident.asr_result_uncertain": "识别结果待确认",
@@ -40,6 +41,7 @@ export const diagnosticsZh = {
 } as const;
 type Locale = Record<keyof typeof diagnosticsZh, string>;
 export const diagnosticsEn: Locale = {
+  "diagnostics.recognition_stall_suspected": "Audio and heartbeats continue, but no new transcript has arrived for a while. This diagnostic does not confirm a model failure.",
   "diagnostics.incident.audio_missing": "Audio Gap",
   "diagnostics.incident.storage_failed": "Storage Error",
   "diagnostics.incident.asr_result_uncertain": "Recognition Uncertain",
@@ -80,6 +82,7 @@ export const diagnosticsEn: Locale = {
   "diagnostics.levelHint": "Level indicates sound intensity, not whether someone is speaking. Sent audio does not mean recognition is complete.",
 };
 export const diagnosticsKo: Locale = {
+  "diagnostics.recognition_stall_suspected": "오디오와 하트비트는 전송되지만 새 원문이 한동안 없습니다. 이 진단만으로 모델 오류를 확정할 수 없습니다.",
   "diagnostics.incident.audio_missing": "음성 수집 누락",
   "diagnostics.incident.storage_failed": "저장 오류",
   "diagnostics.incident.asr_result_uncertain": "인식 결과 미확인",

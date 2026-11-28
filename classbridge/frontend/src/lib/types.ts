@@ -31,6 +31,7 @@ export interface SourceState {
   status: SourceStatus;
   start_ms: number;
   end_ms: number;
+  end_time_state?: "confirmed" | "provisional" | "unknown";
   mode: Mode;
   source_event_seq?: number;
   stable_preview?: string;
@@ -71,6 +72,7 @@ export interface Segment {
   translation_revision: number;
   start_ms: number;
   end_ms: number;
+  end_time_state?: "confirmed" | "provisional" | "unknown";
   text: string;
   translation: string;
   status: string;

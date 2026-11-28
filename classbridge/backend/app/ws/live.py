@@ -16,7 +16,7 @@ from app.api.auth import authenticate_cookie, COOKIE_NAME
 from app.config import settings
 from app.db import SessionLocal
 from app.providers.transport import blocking_call, PCM_BYTES_PER_MS
-from app.services.audio_diagnostics import captures, process_buffer_bytes, buffering_state, loop_health
+from app.services.audio_diagnostics import captures, process_buffer_bytes, buffering_state, loop_health, recognition_progress
 from app.models import Session, RecognitionStream, Event, AudioAsset, User, ProcessingTask, SegmentRevision, uid
 from app.services.events import emit, save_final, enqueue, save_interrupted, latest_segments
 from app.services.timing import captured_duration_ms
@@ -41,8 +41,8 @@ class LiveCapture:
         self.ws=ws;self.session_id=session_id;self.user_id=user_id
         self.queue=asyncio.Queue(maxsize=4096)
         self.stream_id=None;self.mode=None;self.offset=0;self.started=0;self.task=None
-        self.stopping=False;self.current_revisions={};self.finalized=set();self.last_results={};self.final_results=set();self.translation_tasks={}
-        self.last_translation={};self.first_seen={};self.audio_file=None;self.audio_path=None;self.audio_id=None;self.audio_bytes=0
+        self.stopping=False;self.reset_source_state();self.translation_tasks={}
+        self.last_translation={};self.audio_file=None;self.audio_path=None;self.audio_id=None;self.audio_bytes=0
         self.legacy_inputs={}
         self.final_translations={}
         self.translation_metrics=dict.fromkeys(('asr_partial_events','asr_final_events','translation_preview_requests',
@@ -51,13 +51,12 @@ class LiveCapture:
         self.last_backlog_check=0;self.capture_ended=None;self.queued_bytes=0
         self.ready=False;self.request_id=None;self.captured_before=0
         self.asr_metrics={};self.failure_reported=False
-        self.asr_provider=None;self.asr_snapshot=None
+        self.asr_provider=None;self.asr_snapshot=None;self.effective_asr=None
         self.asr_language_mode='auto'
         self.asr_acoustic_profile='far'
         self.asr_enhancement={}
         self.received_audio_ms=0;self.last_audio_at=None;self.level_window=deque(maxlen=50)
         self.preview=None
-        self.unconfirmed={}
         self.target_language=None
         self.audio_queue_peak=0
         self.delivery=None;self.delivery_pending={};self.delivery_wakeup=asyncio.Event();self.delivery_failed=None
@@ -141,14 +140,14 @@ class LiveCapture:
             # recovery are already maintained independently by consume().
             key=(event_type,fields.get('sentence_id'))
             if key not in self.delivery_pending and len(self.delivery_pending)>=401:
-                from app.providers.aliyun import ProviderError
+                from app.providers.errors import ProviderError
                 self.delivery_failed=ProviderError('subtitle_backlog','字幕接收积压，已停止采集；原文仍按版本保存。')
             elif not self.delivery_failed:self.delivery_pending[key]=payload
             self.delivery_wakeup.set()
         else:await self.send(payload)
 
     async def deliver_previews(self):
-        from app.providers.aliyun import ProviderError
+        from app.providers.errors import ProviderError
         try:
             while True:
                 await self.delivery_wakeup.wait()
@@ -182,7 +181,7 @@ class LiveCapture:
             allowed,pending=await blocking_call(check)
             if self.stopping:continue
             self.pending_processing_tasks=pending
-            from app.providers.aliyun import ProviderError
+            from app.providers.errors import ProviderError
             if not allowed:raise ProviderError('capture_state_changed','会话已停止或采集权限状态发生变化。')
             if pending>=settings.processing_backlog_hard_limit:
                 self.signal_stop()
@@ -204,7 +203,7 @@ class LiveCapture:
             self.audio_file.writeframesraw(batch);written=True
         try:await blocking_call(write)
         except Exception as exc:
-            from app.providers.aliyun import ProviderError
+            from app.providers.errors import ProviderError
             raise ProviderError('audio_storage_failed','保留音频写入失败，不能保证音频文件完整。') from exc
         finally:
             if written:self.archive_bytes-=len(batch);self.audio_bytes+=len(batch)
@@ -221,12 +220,17 @@ class LiveCapture:
                 await self.transient('processing.failed',request_id=request_id,code='session_active',message='会话正在另一连接中录音');return
             if db.query(ProcessingTask).filter(ProcessingTask.session_id==row.id,ProcessingTask.kind=='reprocess',ProcessingTask.status.in_(['pending','retry','running'])).first():
                 await self.transient('processing.failed',request_id=request_id,code='post_processing_active',message='会后音频整理尚未完成，请等待处理结束后继续录音');return
-            self.asr_provider=None;self.asr_snapshot=None
+            self.asr_provider=None;self.asr_snapshot=None;self.effective_asr=None
             if row.mode=='real':
-                from app.providers.aliyun import ProviderError
+                from app.providers.errors import ProviderError
                 try:
                     profile,self.asr_snapshot=select(db,db.get(User,self.user_id),row.asr_profile_id)
-                    self.asr_provider=create_asr_provider(snapshot=self.asr_snapshot)
+                    from app.services.asr_config_resolver import resolve_effective_asr_config
+                    preferences=(db.get(User,self.user_id).settings or {})
+                    self.effective_asr=resolve_effective_asr_config(settings,self.asr_snapshot,preferences)
+                    self.asr_snapshot={**self.asr_snapshot,'effective':self.effective_asr.public_snapshot()}
+                    self.asr_provider=create_asr_provider(snapshot=self.asr_snapshot,effective=self.effective_asr)
+                    self.capture_preferences=dict(preferences)
                     self.asr_provider.ensure_configured()
                     row.asr_profile_id=profile.id;row.asr_snapshot=self.asr_snapshot
                 except (ProviderError,HTTPException) as exc:
@@ -248,13 +252,12 @@ class LiveCapture:
             self.subtitle_send_wait_ms=0;self.pending_processing_tasks=0
             self.received_audio_ms=0;self.last_audio_at=None;self.level_window.clear()
             self.preview=None
-            self.unconfirmed={}
             self.capture_ended=None;self.last_backlog_check=0
             self.queue=asyncio.Queue(maxsize=4096)
             self.queued_bytes=0;self.queued_frames=0;self.audio_queue_peak=0
             self.archive_queue.clear();self.archive_bytes=0
             self.delivery_pending.clear();self.delivery_failed=None;self.preview_terms=None
-            self.current_revisions={};self.finalized=set();self.last_results={};self.final_results=set();self.first_seen={};self.last_translation={}
+            self.reset_source_state();self.last_translation={}
             self.legacy_inputs.clear()
             self.translation_metrics=dict.fromkeys(self.translation_metrics,0)
             self.audio_id=None;self.audio_bytes=0
@@ -366,6 +369,10 @@ class LiveCapture:
                     'asr_result_consume_ms','asr_result_consume_p95_ms','asr_partial_received','asr_partial_coalesced',
                     'asr_final_received','asr_final_committed')},
                 **loop_health.snapshot(),
+                **recognition_progress(self.asr_metrics,stamp,started=self.started,last_audio=self.last_audio_at,
+                    input_dbfs=20*math.log10(max(rms,1)/32768),backlog_ms=self.outstanding_bytes()/32,
+                    warning_seconds=settings.asr_stall_warning_seconds),
+                **{key:self.asr_metrics.get(key,0) for key in ('unknown_provider_events','empty_final_events','empty_partial_events','final_conflicts')},
                 'audio_queue_peak_ms':self.audio_queue_peak/PCM_BYTES_PER_MS,
                 'archive_queue_ms':self.archive_bytes/PCM_BYTES_PER_MS,
                 'preview_metrics':{**self.translation_metrics,**({**self.preview.metrics,
@@ -393,6 +400,8 @@ class LiveCapture:
         metadata=fields(capture_id or self.request_id,self.stream_id,kind,reason_code or self.first_failure_code,duration_ms,incident_id)
         browser={k:v for k,v in (browser_diagnostics or {}).items() if k in ('captured_pcm_bytes','rejected_pcm_bytes','buffered_audio_ms_estimated')
             and isinstance(v,(int,float)) and math.isfinite(v) and 0<=v<=2**40}
+        if (browser_diagnostics or {}).get('flush_status') in ('timeout','cancelled'):
+            browser['flush_status']=browser_diagnostics['flush_status']
         def persist():
             with SessionLocal() as db:
                 row=db.get(Session,self.session_id)
@@ -590,48 +599,48 @@ class LiveCapture:
             await asyncio.gather(*list(self.final_translations.values()),return_exceptions=True)
         self.final_translations.clear()
 
+    def reset_source_state(self):
+        from app.services.transcript_state import HypothesisStore
+        self.hypotheses=HypothesisStore()
+        # Compatibility aliases for existing callers; one owner of each cache.
+        self.current_revisions=self.hypotheses.revisions
+        self.finalized=self.hypotheses.finalized
+        self.last_results=self.hypotheses.last_results
+        self.final_results=self.hypotheses.final_results
+        self.unconfirmed=self.hypotheses.unconfirmed
+        self.first_seen=self.hypotheses.first_seen
+
     def trim_source_cache(self):
-        # Unfinished records have their own 200-entry limit; only completed
-        # identities are evicted. Database revisions still reject late callbacks.
-        while len(self.finalized)>512:
-            sid=next(key for key in self.current_revisions if key in self.finalized)
-            self.finalized.remove(sid)
-            for cache in (self.current_revisions,self.last_results,self.first_seen,self.last_translation):cache.pop(sid,None)
-            self.final_results={fp for fp in self.final_results if fp[0]!=sid}
-        while len(self.final_results)>2048:self.final_results.pop()
+        for sid in self.hypotheses.trim():self.last_translation.pop(sid,None)
 
     async def consume(self,event):
-        sid=f'{self.stream_id}:{event["sentence_id"]}'
-        text=event.get('text','').strip()
-        if not text:return
-        final=bool(event.get('final'))
+        from app.services.transcript_processor import normalize_update,lookup_transcript,persist_final_update
+        from app.providers.errors import ProviderError
+        update = normalize_update(event, self.stream_id, self.offset)
+        if update is None or not update.text:return
+        sid,text,final,start,end = update.sentence_id,update.text,update.final,update.start_ms,update.end_ms
+        self.asr_metrics['last_final_monotonic' if final else 'last_partial_monotonic']=time.monotonic()
         self.translation_metrics['asr_final_events' if final else 'asr_partial_events']+=1
-        # Receipt order is not a source revision. Late provisional hypotheses
-        # cannot reopen a final sentence, and duplicate events must be idempotent.
-        if sid in self.finalized and not final:return
-        start=self.offset+max(0,int(event.get('start_ms') or 0))
-        end=max(start,self.offset+max(0,int(event.get('end_ms') or event.get('start_ms') or 0)))
-        result=(text,start,end,final)
-        if self.last_results.get(sid)==result:return
-        fingerprint=(sid,text,start,end)
-        if final and fingerprint in self.final_results:return
-        from app.providers.aliyun import ProviderError
-        if event.get('stream_id') not in (None,self.stream_id):return
+        from app.services.transcript_state import Decision
+        allow_revision=getattr(self.asr_provider,'supports_final_revisions',True)
+        decision=self.hypotheses.assess(update,allow_final_revision=allow_revision)
+        if decision in (Decision.STALE,Decision.DUPLICATE):return
+        if decision == Decision.CONFLICT:
+            self.asr_metrics['final_conflicts']=self.asr_metrics.get('final_conflicts',0)+1
+            return
+        result=update.result
         def lookup():
             with SessionLocal() as db:
-                session=db.get(Session,self.session_id)
-                if not session or session.active_stream_id!=self.stream_id:return False,None,False
-                saved=None
-                if sid not in self.current_revisions:
-                    saved=db.query(SegmentRevision).filter_by(session_id=self.session_id,stream_id=self.stream_id,sentence_id=sid).order_by(SegmentRevision.source_revision.desc()).first()
-                duplicate=final and db.query(SegmentRevision.id).filter_by(session_id=self.session_id,stream_id=self.stream_id,sentence_id=sid,text=text,start_ms=start,end_ms=end).first() is not None
-                return True,saved.source_revision if saved else None,duplicate
+                return lookup_transcript(db,self.session_id,self.user_id,self.stream_id,update,sid in self.current_revisions)
         allowed,saved_revision,duplicate=await blocking_call(lookup)
         if not allowed:return
         if saved_revision is not None:
             self.current_revisions[sid]=saved_revision;self.finalized.add(sid);self.trim_source_cache()
             if not final:return
         if duplicate:return
+        if saved_revision is not None and final and not allow_revision:
+            self.asr_metrics['final_conflicts']=self.asr_metrics.get('final_conflicts',0)+1
+            return
         revision=self.current_revisions.get(sid,0)+1
         stamp=time.monotonic();self.first_seen.setdefault(sid,stamp)
         if final:
@@ -658,22 +667,14 @@ class LiveCapture:
             try:
                 def persist_final():
                     with SessionLocal() as db:
-                        saved=save_final(db,self.session_id,self.stream_id,sid,revision,text,start,max(start,end),
+                        return persist_final_update(db,self.session_id,self.stream_id,update,revision,save=save_final,
                             latency={'source_first_ms':max(0,int((self.first_seen[sid]-self.started)*1000)-int(event.get('start_ms') or 0)),
                                      'source_final_ms':max(0,int((stamp-self.started)*1000)-int(event.get('end_ms') or 0)),**preview_latency},preview_candidate=candidate,preview_handoff=lease)
-                        if saved is None:
-                            row=db.get(Session,self.session_id)
-                            if not row or row.active_stream_id!=self.stream_id:return False
-                            existing=db.query(SegmentRevision).filter_by(session_id=self.session_id,stream_id=self.stream_id,sentence_id=sid,source_revision=revision).first()
-                            if not existing or (existing.text,existing.start_ms,existing.end_ms)!=(text,start,end):
-                                raise ValueError('source_revision_conflict')
-                    return True
                 if not await self.write_database(persist_final):return
             except Exception as exc:
                 raise ProviderError('source_storage_failed','正式原文保存失败，未标记定稿成功；请检查数据库。',diagnostics={'exception_type':type(exc).__name__}) from exc
             # Only committed or verified idempotent final results own these markers.
-            self.current_revisions[sid]=revision;self.last_results[sid]=result
-            self.finalized.add(sid);self.final_results.add(fingerprint);self.unconfirmed.pop(sid,None)
+            self.hypotheses.commit_final(update,revision)
             self.asr_metrics['asr_final_committed']=self.asr_metrics.get('asr_final_committed',0)+1
             if lease and len(self.final_translations)<settings.preview_max_sentences:
                 key=(sid,revision)
@@ -689,11 +690,10 @@ class LiveCapture:
                 preview_entry.task.cancel()
             self.trim_source_cache()
         else:
-            if sid not in self.unconfirmed and len(self.unconfirmed)>=200:
-                raise ProviderError('source_buffer_full','未定稿原文积压超过保护上限，已停止采集并保留未确认记录。')
+            self.hypotheses.check_partial_capacity(sid)
             self.current_revisions[sid]=revision;self.last_results[sid]=result
             self.unconfirmed[sid]={'sentence_id':sid,'source_revision':revision,'text':text,
-                'start_ms':start,'end_ms':end,'last_received_at':datetime.now(timezone.utc).isoformat()}
+                'start_ms':start,'end_ms':end,'end_time_state':update.end_state,'last_received_at':datetime.now(timezone.utc).isoformat()}
             self.translation_tasks={sid:t for sid,t in self.translation_tasks.items() if not t.done()}
             preview=self.ensure_preview()
             fields={}
@@ -701,7 +701,7 @@ class LiveCapture:
                 state=preview.update(sid,revision,text,start,end)
                 fields={'stable_preview':state.stable_preview,'unstable_tail':state.unstable_tail,
                     'hypothesis_revision':state.hypothesis_revision}
-            await self.transient('transcript.partial',sentence_id=sid,source_revision=revision,translation_revision=0,start_ms=start,end_ms=max(start,end),text=text,status='partial',
+            await self.transient('transcript.partial',sentence_id=sid,source_revision=revision,translation_revision=0,start_ms=start,end_ms=max(start,end),text=text,status='partial',end_time_state=update.end_state,
                 latency={'source_first_ms':max(0,int((self.first_seen[sid]-self.started)*1000)-int(event.get('start_ms') or 0))},**fields)
             if preview:
                 preview.tick()
@@ -737,24 +737,23 @@ class LiveCapture:
                 await self.mark_ready()
                 await self.demo()
             else:
-                from app.services.asr_options import asr_vocabulary,asr_language_hints
-                with SessionLocal() as db:
-                    user=db.get(User,self.user_id)
-                    preferences=(user.settings or {}) if user else {}
-                    self.preview_terms=preferences.get('terms',[])
-                    weight=preferences.get('asr_hotword_weight',2)
-                    vocabulary=asr_vocabulary(preferences.get('terms',[]),weight)
-                    context=str(preferences.get('asr_context','')).strip()[:400]
-                    self.asr_enhancement={'hotword_count':len(vocabulary),'weight':weight,'context_chars':len(context)}
-                    self.asr_language_mode=preferences.get('asr_language_mode','auto')
-                    profile=preferences.get('asr_acoustic_profile','far')
-                    self.asr_acoustic_profile=profile if profile in ('far','near') else 'far'
+                from app.services.asr_config_resolver import resolve_effective_asr_config
+                if self.effective_asr is None: # Existing direct run()/test injection callers.
+                    with SessionLocal() as db:
+                        user=db.get(User,self.user_id)
+                        self.capture_preferences=dict((user.settings or {}) if user else {})
+                    self.effective_asr=resolve_effective_asr_config(settings,self.asr_snapshot,self.capture_preferences)
+                preferences=self.capture_preferences
+                self.preview_terms=preferences.get('terms',[])
+                effective=self.effective_asr
+                self.asr_enhancement={'hotword_count':len(effective.vocabulary),'weight':effective.vocabulary_weight,'context_chars':len(effective.context)}
+                self.asr_language_mode=preferences.get('asr_language_mode','auto')
+                self.asr_acoustic_profile='near' if effective.vad_model=='near_meeting_16k' else 'far'
                 async def recognize():
                     consume_samples=deque(maxlen=120)
                     self.dispatch_started.set()
                     stream=self.asr_provider.stream_asr(self.audio_iter(),on_ready=self.mark_ready,metrics=self.asr_metrics,
-                        vocabulary=vocabulary,context=context,language_hints=self.asr_snapshot['language_hints'] if self.asr_snapshot else asr_language_hints(self.asr_language_mode),
-                        vad_model='near_meeting_16k' if self.asr_acoustic_profile=='near' else 'far_field_meeting_16k')
+                        **effective.arguments())
                     async with contextlib.aclosing(stream):
                         async for event in stream:
                             stamp=time.monotonic();await self.consume(event)
@@ -768,7 +767,7 @@ class LiveCapture:
                 done,_=await asyncio.wait([processing,*workers],return_when=asyncio.FIRST_COMPLETED)
                 failed=next((t for t in workers if t in done),None)
                 if failed:
-                    from app.providers.aliyun import ProviderError
+                    from app.providers.errors import ProviderError
                     error=failed.exception() or ProviderError('capture_worker_failed','采集维护任务意外结束。')
                     # Stop admission, but let accepted PCM and official ASR finals
                     # drain even when browser preview delivery/storage failed.
@@ -782,7 +781,7 @@ class LiveCapture:
                 await processing
         except asyncio.CancelledError:raise
         except Exception as exc:
-            from app.providers.aliyun import ProviderError
+            from app.providers.errors import ProviderError
             await self.fail(exc.code if isinstance(exc,ProviderError) else 'upstream_error',
                 exc.message if isinstance(exc,ProviderError) else '识别处理异常，已停止采集；请检查服务器诊断日志。',
                 {**(exc.diagnostics if isinstance(exc,ProviderError) else {}),'exception_type':type(exc).__name__,

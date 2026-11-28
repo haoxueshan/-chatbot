@@ -22,6 +22,10 @@ export interface CaptureHealth {
   pending_processing_tasks?: number;
   processing_state?: string;
   first_failure_code?: string | null;
+  recognition_stall_suspected?: boolean;
+  last_provider_heartbeat_age_ms?: number | null;
+  last_asr_partial_age_ms?: number | null;
+  last_asr_final_age_ms?: number | null;
 }
 
 export function recognitionStatusCode(h: CaptureHealth) {
@@ -34,12 +38,14 @@ export function recognitionStatusCode(h: CaptureHealth) {
   if (h.received_audio_ms - h.sent_audio_ms > 1000) return "forwarding_queue";
   if (h.last_transcript_age_ms < 10_000) return "streaming";
   if (h.input_dbfs < -50) return "quiet";
+  if (h.recognition_stall_suspected) return "recognition_stall_suspected";
   return "awaiting_transcript";
 }
 
 // Compatibility for non-localized callers; UI renders the stable code.
 export function recognitionStatus(h: CaptureHealth): string {
   const labels = {
+    recognition_stall_suspected: "音频和心跳仍在传输，但长时间没有新原文；这是诊断提示，不能确认模型故障。",
     missing_audio: "服务器未持续收到麦克风音频，请检查设备和 VPN 连接。",
     network_buffering: "正在录音 · 网络波动，正在缓冲音频",
     forwarding_delay: "正在录音 · 音频转发稍有延迟",

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
-from app.providers.aliyun import ProviderError
+from app.providers.errors import ProviderError
 from .aliyun import AliyunASRAdapter
 
 
@@ -9,6 +9,10 @@ class AliyunOptions(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     context: str | None=Field(default=None,max_length=400)
     vad_model: Literal['near_meeting_16k','far_field_meeting_16k'] | None=None
+    max_sentence_silence: int | None=Field(default=None,ge=200,le=6000)
+    multi_threshold_mode_enabled: bool | None=None
+    speech_noise_threshold: float | None=Field(default=None,ge=-1,le=1,allow_inf_nan=False)
+    keep_dialect: bool | None=None
 
 
 class SonioxOptions(BaseModel):

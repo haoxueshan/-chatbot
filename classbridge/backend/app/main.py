@@ -65,7 +65,7 @@ async def safe_asr_validation(request,exc):
     return await request_validation_exception_handler(request,exc)
 
 
-from app.providers.aliyun import ProviderError
+from app.providers.errors import ProviderError
 @app.exception_handler(ProviderError)
 async def provider_error_handler(request,exc):
     status=409 if exc.code=='asr_profile_disabled' else (503 if exc.code in ('missing_api_key','missing_workspace','invalid_endpoint','region_mismatch','model_permission','model_unavailable','unsupported_asr_provider') else (429 if exc.code=='rate_limited' else 502))

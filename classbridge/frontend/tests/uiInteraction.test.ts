@@ -279,6 +279,47 @@ test("ASR session selection patches only idle session and keeps the same WebSock
   assert.equal(Socket.instances.length,1);assert.equal(socket.closed,false);
 });
 
+for (const ending of ['normal', 'timeout', 'disconnect', 'microphone', 'server-stop', 'unmount'] as const) {
+  test(`normal flush ${ending} preserves generation until tail or emergency cancellation`, async () => {
+    const {useLive} = await import('../src/lib/useLive.ts');
+    const {AudioCapture} = await import('../src/lib/audio.ts');
+    const originals = {start:AudioCapture.prototype.start,stop:AudioCapture.prototype.stop,finish:AudioCapture.prototype.finish};
+    let onFrame!: (f:ArrayBuffer)=>void, interrupt!: (s:string)=>void, resolve!: (r:any)=>void;
+    let state!: ReturnType<typeof useLive>, finishes=0;
+    AudioCapture.prototype.start = async function(f,_l,i){onFrame=f;interrupt=i;};
+    AudioCapture.prototype.stop = function(){};
+    AudioCapture.prototype.finish = function(){finishes++; return new Promise(r=>{resolve=r;});};
+    function Probe(){state=useLive(other,()=>{});return null;}
+    try {
+      const view=await mount(h(Probe));
+      const socket=Socket.instances.at(-1)!;
+      (socket as any).bufferedAmount=0;
+      await act(async()=>socket.open()); await act(async()=>state.start());
+      const request=socket.sent.find(e=>e.type==='start').request_id;
+      await act(async()=>socket.event({type:'session.state',session_id:other.id,stream_id:'current',request_id:request,event_seq:1,state:'recording',ready:true}));
+      const order:string[]=[];const send=socket.send.bind(socket);
+      socket.send=((v:string|ArrayBuffer)=>{if(v instanceof ArrayBuffer)order.push(`pcm:${v.byteLength}`);else {order.push(JSON.parse(v).type);send(v);}}) as typeof socket.send;
+      await act(async()=>{state.stop();state.stop();});
+      assert.equal(finishes,1);assert.equal(state.flushing,true);assert.equal(state.active,true);
+      await act(async()=>state.start());assert.equal(finishes,1);
+      if(ending==='disconnect') await act(async()=>{socket.readyState=3;onFrame(new ArrayBuffer(100));});
+      if(ending==='microphone') await act(async()=>interrupt('microphone interrupted'));
+      if(ending==='server-stop') await act(async()=>socket.event({type:'session.state',session_id:other.id,stream_id:'current',request_id:request,event_seq:2,state:'stopped'}));
+      if(ending==='unmount') await view.render(h('div'));
+      const before=order.filter(x=>x==='stop').length;
+      await act(async()=>{onFrame(new ArrayBuffer(200));resolve({status:ending==='timeout'?'timeout':'complete',emitted_samples:100});});
+      if(ending==='normal') assert.deepEqual(order,['pcm:200','stop']);
+      else if(ending==='timeout') {
+        assert.deepEqual(order,['pcm:200','capture.gap','stop']);
+        assert.equal(socket.sent.find(e=>e.type==='capture.gap').browser_diagnostics.flush_status,'timeout');
+        await act(async()=>state.stop());
+        assert.equal(order.filter(x=>x==='stop').length,1);
+      }
+      else {assert.equal(order.includes('pcm:200'),false);assert.equal(order.filter(x=>x==='stop').length,before);}
+    } finally {Object.assign(AudioCapture.prototype,originals);}
+  });
+}
+
 for (const failure of ["backpressure", "configured-backpressure", "closed", "send-throws"]) {
   test(`audio ${failure} releases capture once and rejects late frames`, async () => {
     const { useLive } = await import("../src/lib/useLive.ts");

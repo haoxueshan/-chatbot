@@ -1,4 +1,5 @@
 export const captureZh = {
+  "capture.flushing": "正在发送录音尾帧…",
   "capture.connected": "已连接",
   "capture.connecting": "连接中",
   "capture.disconnected": "已断开",
@@ -44,6 +45,7 @@ export const captureZh = {
 } as const;
 type CaptureLocale = Record<keyof typeof captureZh, string>;
 export const captureEn: CaptureLocale = {
+  "capture.flushing": "Sending remaining audio…",
   "capture.connected": "Connected",
   "capture.connecting": "Connecting",
   "capture.disconnected": "Disconnected",
@@ -88,6 +90,7 @@ export const captureEn: CaptureLocale = {
   "translation.revisable": "Temporary translation · May change with the transcript",
 };
 export const captureKo: CaptureLocale = {
+  "capture.flushing": "남은 오디오 전송 중…",
   "capture.connected": "연결됨",
   "capture.connecting": "연결 중",
   "capture.disconnected": "연결 끊김",

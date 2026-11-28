@@ -15,11 +15,8 @@ from websockets.exceptions import InvalidStatus, InvalidMessage, ConnectionClose
 from app.providers.transport import tls_context, ASRResultQueue, safe_provider_code
 
 
-class ProviderError(Exception):
-    def __init__(self, code: str, message: str, retryable: bool = False, diagnostics=None):
-        super().__init__(message)
-        self.code, self.message, self.retryable = code, message, retryable
-        self.diagnostics = diagnostics or {}
+from app.providers.errors import ProviderError
+from app.providers.asr.aliyun_protocol import build_run_task, build_finish_task, parse_server_event
 
 
 def classify_error(status: int = 0, code: str = "") -> ProviderError:
@@ -209,20 +206,9 @@ class AliyunProvider:
     async def stream_asr(self, audio: AsyncIterator[bytes], *, vocabulary=None, context=None, language_hints=None, vad_model=None, on_ready=None, metrics=None) -> AsyncIterator[dict]:
         """Caller closes audio iterator on stop; final results drain until task-finished."""
         task_id = uuid.uuid4().hex
-        params = {"format": "pcm", "sample_rate": 16000, "heartbeat": True}
-        if vad_model is not None:
-            if vad_model not in ("near_meeting_16k", "far_field_meeting_16k"):
-                raise ProviderError("invalid_asr_parameter", "不支持的拾音场景参数。")
-            params["vad_model"] = vad_model
-        if language_hints:
-            params['language_hints'] = list(language_hints)
-        if vocabulary:
-            params["vocabulary"] = {str(k): max(1, min(5, int(v))) for k, v in vocabulary.items()}
-        input_data = {}
-        if context:
-            # Only the documented input.context messages are sent; no invented prompt field.
-            input_data["context"] = [{"role": "user", "content": [{"type": "input_text", "text": str(context).strip()[:400]}]}]
-        message = {"header": {"action": "run-task", "task_id": task_id, "streaming": "duplex"}, "payload": {"task_group": "audio", "task": "asr", "function": "recognition", "model": self.value("asr_model", "qwen-audio-3.1-asr-flash-streaming"), "parameters": params, "input": input_data}}
+        message = build_run_task(task_id, self.value("asr_model", "qwen-audio-3.1-asr-flash-streaming"),
+                                 vocabulary=vocabulary, context=context, language_hints=language_hints, vad_model=vad_model,
+                                 options=self.value('asr_options',{}))
         headers = self.headers()
         sender = None
         receiver = None
@@ -239,7 +225,10 @@ class AliyunProvider:
                 phase='task_start'
                 await ws.send(json.dumps(message))
                 first = json.loads(await asyncio.wait_for(ws.recv(), self.timeout))
-                if first.get("header", {}).get("event") != "task-started":
+                first_event, _ = parse_server_event(first, task_id)
+                if first_event == 'foreign':
+                    raise ProviderError('protocol_error', '识别服务返回了不匹配的任务确认，音频尚未发送。')
+                if first_event != "task-started":
                     raise classify_error(0, first.get("header", {}).get("error_code", ""))
                 if first.get("header", {}).get("task_id") != task_id:
                     raise ProviderError('protocol_error','识别服务返回了不匹配的任务确认，音频尚未发送，请重新开始。')
@@ -286,7 +275,7 @@ class AliyunProvider:
                     phase='finish'
                     finish_started_at=time.monotonic()
                     finishing.set_result(None) # Recompute deadline even if finish-task send stalls.
-                    await asyncio.wait_for(ws.send(json.dumps({"header": {"action": "finish-task", "task_id": task_id, "streaming": "duplex"}, "payload": {"input": {}}})),self.timeout)
+                    await asyncio.wait_for(ws.send(json.dumps(build_finish_task(task_id))),self.timeout)
                     finish_sent=True
 
                 results=ASRResultQueue(metrics)
@@ -316,12 +305,13 @@ class AliyunProvider:
                             if not done:remaining() # classify the expired deadline without restarting recv
                         data=json.loads(receiver.result())
                         receiver=None
-                        header = data.get("header", {})
-                        if header.get("task_id") != task_id:
-                            metrics['foreign_task_events']=metrics.get('foreign_task_events',0)+1
+                        event, normalized = parse_server_event(data, task_id)
+                        if event in ('foreign', 'unknown'):
+                            key = 'foreign_task_events' if event == 'foreign' else 'unknown_provider_events'
+                            metrics[key] = metrics.get(key, 0) + 1
                             continue
+                        header = data['header']
                         metrics['last_event_monotonic']=time.monotonic()
-                        event = header.get("event")
                         if event == "task-failed":
                             error=classify_error(0, header.get("error_code", ""))
                             error.diagnostics['provider_error_code']=safe_provider_code(header.get('error_code'))
@@ -337,15 +327,18 @@ class AliyunProvider:
                             break
                         if event != "result-generated":
                             continue
-                        sentence = data.get("payload", {}).get("output", {}).get("sentence", {})
-                        if sentence.get("heartbeat"):
+                        if normalized is None:
                             metrics['heartbeat_events']=metrics.get('heartbeat_events',0)+1
+                            metrics['last_heartbeat_monotonic']=time.monotonic()
                             continue
-                        if not sentence.get("text"):
+                        if not normalized['text'].strip():
+                            key = 'empty_final_events' if normalized['final'] else 'empty_partial_events'
+                            metrics[key] = metrics.get(key, 0) + 1
                             continue
-                        metrics['last_transcript_monotonic']=time.monotonic()
+                        normalized['received_monotonic'] = time.monotonic()
+                        metrics['last_transcript_monotonic']=normalized['received_monotonic']
                         metrics['transcript_events']=metrics.get('transcript_events',0)+1
-                        await results.put({"sentence_id": str(sentence["sentence_id"]), "text": sentence["text"], "start_ms": int(sentence.get("begin_time") or 0), "end_ms": sentence.get("end_time"), "final": bool(sentence.get("sentence_end")), "words": sentence.get("words", [])})
+                        await results.put(normalized)
 
                 sender=asyncio.create_task(send_audio())
                 reader=asyncio.create_task(receive_results())

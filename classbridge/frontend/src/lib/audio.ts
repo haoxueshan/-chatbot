@@ -5,6 +5,7 @@ export interface AudioInputOptions {
 }
 export type AppliedAudioSettings = Pick<MediaTrackSettings,"echoCancellation"|"noiseSuppression"|"autoGainControl"|"sampleRate"|"channelCount">;
 export interface AudioQuality { input_peak:number; peak_window_ms:number; possible_clipping:boolean; }
+export interface FlushResult { status: "complete" | "timeout" | "cancelled"; emitted_samples?: number; }
 
 // PCM16LE mono 16 kHz: 32 bytes/ms; budget includes the frame about to send.
 export const PCM_QUEUE_BYTES = 2000 * 32;
@@ -32,6 +33,9 @@ export class AudioCapture {
   private stream: MediaStream | null = null;
   private node: AudioWorkletNode | null = null;
   private cancelled = false;
+  private finishOperation: Promise<FlushResult> | null = null;
+  private flushRequest = 0;
+  private resolveFlush: ((result: FlushResult) => void) | null = null;
   async start(
     onFrame: (frame: ArrayBuffer) => void,
     onLevel: (level: number, quality?: AudioQuality) => void,
@@ -42,6 +46,7 @@ export class AudioCapture {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
       throw new Error("麦克风需要 HTTPS 安全连接（本机 localhost 除外）");
     this.cancelled = false;
+    this.finishOperation = null;
     this.context = new AudioContext();
     try {
       await this.context.resume();
@@ -68,6 +73,8 @@ export class AudioCapture {
       this.node.port.onmessage = ({ data }) => {
         if (this.cancelled) return;
         if (data.type === "frame") onFrame(data.frame);
+        else if (data.type === "flush-complete" && data.request_id === this.flushRequest)
+          this.resolveFlush?.({status: "complete", emitted_samples: data.emitted_samples});
         else if (data.type === "level") onLevel(data.rms, {input_peak:data.input_peak,peak_window_ms:data.peak_window_ms,possible_clipping:data.possible_clipping});
       };
       this.context.createMediaStreamSource(stream).connect(this.node);
@@ -95,8 +102,28 @@ export class AudioCapture {
   begin() {
     if (!this.cancelled) this.node?.port.postMessage({ type: "begin" });
   }
+  finish(timeoutMs = 500): Promise<FlushResult> {
+    if (this.finishOperation) return this.finishOperation;
+    if (this.cancelled || !this.node) return Promise.resolve({status: "cancelled"});
+    this.finishOperation = new Promise<FlushResult>((resolve) => {
+      const timer = setTimeout(() => this.resolveFlush?.({status: "timeout"}), timeoutMs);
+      this.resolveFlush = (result) => {
+        clearTimeout(timer);
+        this.resolveFlush = null;
+        this.stop();
+        resolve(result);
+      };
+      try { this.node!.port.postMessage({type: "flush", request_id: ++this.flushRequest}); }
+      catch { this.resolveFlush({status: "cancelled"}); }
+    });
+    return this.finishOperation;
+  }
   stop() {
+    if (this.cancelled) return;
     this.cancelled = true;
+    const resolve = this.resolveFlush;
+    this.resolveFlush = null;
+    resolve?.({status: "cancelled"});
     this.stream?.getTracks().forEach((t) => {
       t.onended = null;
       t.stop();

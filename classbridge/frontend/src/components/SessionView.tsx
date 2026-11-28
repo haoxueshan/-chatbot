@@ -886,7 +886,7 @@ export function SessionView({
                   <span className="segment-time">
                     {formatTime(s.start_ms)}
                     <span>—</span>
-                    {formatTime(s.end_ms)}
+                    {s.end_time_state === "unknown" ? "?" : `${s.end_time_state === "provisional" ? "≈" : ""}${formatTime(s.end_ms)}`}
                   </span>
                   <span className="segment-status">
                     {s.source_status === "interrupted" ? t("transcript.uncertain") : s.source_final ? (
@@ -1045,9 +1045,9 @@ export function SessionView({
         </div>
         <div className="capture-main">
           {live.active ? (
-            <button className="stop-button" onClick={() => live.stop()}>
+            <button className="stop-button" disabled={live.flushing} onClick={() => live.stop()}>
               <Square size={16} fill="currentColor" />
-              {live.preparing ? t("capture.cancel") : t(session.mode === "demo" ? "capture.stopDemo" : "capture.stop")}
+              {live.flushing ? t("capture.flushing") : live.preparing ? t("capture.cancel") : t(session.mode === "demo" ? "capture.stopDemo" : "capture.stop")}
             </button>
           ) : (
             <button

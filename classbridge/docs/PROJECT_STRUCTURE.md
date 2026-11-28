@@ -1,5 +1,12 @@
 # ClassBridge 项目结构与模块职责
 
+## P4 更新（2026-11-27）
+
+ASR 共用异常位于 `providers/errors.py`；Qwen 纯协议位于 `providers/asr/aliyun_protocol.py`。`services/asr_config_resolver.py` 解释流启动时的有效配置；`transcript_state.py` 持有有界内存状态；`transcript_processor.py` 负责归一化时间、归属/活动流查询及现有正式保存边界。LiveCapture 保留协调器与翻译调度职责。浏览器 AudioCapture 增加正常 finish，紧急 stop 保留。
+
+完整职责、依赖变化与未实施项见 [P4 报告](ASR_P4_VALIDATION.md)。没有新增 Registry、事件总线或数据库迁移。
+
+
 本文说明当前项目“代码放在哪里、各模块负责什么、数据如何流动、修改功能时应从哪里进入”。内容根据实际源码整理，不是待实现的架构方案。
 
 - 核对日期：2026-11-24。

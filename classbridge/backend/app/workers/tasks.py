@@ -92,7 +92,7 @@ async def translate(db,task):
     row=db.get(SegmentRevision,row.id)
     if not row:return {'skipped':'source_deleted'}
     if not translated.strip():
-        from app.providers.aliyun import ProviderError
+        from app.providers.errors import ProviderError
         raise ProviderError('format_error','翻译服务未返回文本，原文已保留。')
     model_timing=timing.finish() if reused is None else {'translation_model_first_ms':0,'translation_model_final_ms':0}
     elapsed=model_timing['translation_model_final_ms']
@@ -257,7 +257,7 @@ async def execute_task(task_id):
         except Exception as exc:
             db.rollback();task=db.get(ProcessingTask,task_id)
             if not task:return
-            from app.providers.aliyun import ProviderError
+            from app.providers.errors import ProviderError
             retryable=task.kind!='translate' and isinstance(exc,ProviderError) and exc.retryable
             task.error=exc.message if isinstance(exc,ProviderError) else (str(exc)[:500] if isinstance(exc,ValueError) else '后台处理失败，请查看服务端错误类型')
             task.status='retry' if retryable and task.attempts<task.max_attempts else 'failed'

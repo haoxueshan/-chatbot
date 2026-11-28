@@ -8,6 +8,11 @@ class ASREvent(TypedDict):
     start_ms: int
     end_ms: int | None
     final: bool
+    provisional_end_ms: NotRequired[int | None]
+    stable_prefix_hint: NotRequired[str]
+    stability_source: NotRequired[str]
+    provider_sequence: NotRequired[int]
+    received_monotonic: NotRequired[float]
     words: NotRequired[list]
 
 

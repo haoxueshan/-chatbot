@@ -7,7 +7,7 @@ import time
 from collections import deque
 from websockets.asyncio.client import connect as WebSocketConnect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
-from app.providers.aliyun import ProviderError, classify_error
+from app.providers.errors import ProviderError, classify_status
 from app.providers.transport import tls_context, ASRResultQueue
 
 ENDPOINT='wss://stt-rt.soniox.com/transcribe-websocket'
@@ -20,7 +20,7 @@ class connect(WebSocketConnect):
 
 
 def soniox_error(status,code=''):
-    error=classify_error(status,code)
+    category,retryable=classify_status(status,code)
     messages={
         'authentication_failed':'Soniox 身份认证失败，请检查服务器 SONIOX_API_KEY。',
         'quota_exhausted':'Soniox 账户额度或余额不足，请检查供应商控制台。',
@@ -28,7 +28,7 @@ def soniox_error(status,code=''):
         'model_permission':'当前 Soniox API Key 无权访问该模型。',
         'model_unavailable':'Soniox 模型不存在或当前账号无权访问。',
     }
-    return ProviderError(error.code,messages.get(error.code,error.message),error.retryable)
+    return ProviderError(category,messages.get(category,'Soniox 请求失败，请检查服务端诊断代码。'),retryable)
 
 
 def check_error(data):
@@ -123,6 +123,7 @@ class TokenMapper:
 
 
 class SonioxASRAdapter:
+    supports_final_revisions = False
     def __init__(self,config):self.config=config
     def ensure_configured(self):
         if not getattr(self.config,'soniox_api_key',''):
@@ -135,7 +136,10 @@ class SonioxASRAdapter:
         finish_timeout=float(getattr(self.config,'asr_finish_timeout_seconds',None) or timeout)
         send_timeout=float(getattr(self.config,'asr_send_timeout_seconds',5))
         options=getattr(self.config,'asr_options',{})
+        if getattr(self.config,'asr_effective_resolved',False):
+            options={key:value for key,value in options.items() if key not in ('context','terms')}
         hints=getattr(self.config,'asr_language_hints',None)
+        if getattr(self.config,'asr_effective_resolved',False):hints=None
         hints=language_hints if hints is None else hints
         context_data={'text':options.get('context',context) or '',
             'terms':list(dict.fromkeys([*(vocabulary or {}),*options.get('terms',[])]))[:200]}
@@ -211,6 +215,7 @@ class SonioxASRAdapter:
                         data=json.loads(receiver.result());receiver=None;check_error(data)
                         metrics['last_event_monotonic']=time.monotonic()
                         if data.get('type')=='pong':
+                            metrics['last_heartbeat_monotonic']=time.monotonic()
                             metrics['heartbeat_events']=metrics.get('heartbeat_events',0)+1;continue
                         for event in mapper.update(data):
                             metrics['last_transcript_monotonic']=time.monotonic()

@@ -1,5 +1,16 @@
 # 多 ASR 模型管理
 
+## P4 更新（2026-11-27）
+
+实际录音使用启动时不可变配置，写入 `RecognitionStream.asr_snapshot.effective`。语言提示 null 继承用户偏好，[] 为自动；context 显式空串清空；模型 vad_model 优先于 near/far。安全时间上限仍来自服务器。Soniox 词表保持全局优先顺序与去重上限。
+
+Qwen 默认模型可显式配置 max_sentence_silence（200–6000ms）、multi_threshold_mode_enabled、speech_noise_threshold（-1..1）、keep_dialect；默认全部不发送，未知模型的高级参数不声称兼容。模型信息将协议文档兼容性、账号权限未验证、真实调用未验证分开。账号检查不会静默调用真实模型。
+
+11-28：A/B/C 每次创建任务前重新验证输入 PCM；文件变化时停止后续任务。冲突 final 在没有显式修订能力时保留第一份证据，并计入 conflicting_finals。
+
+离线工具 `python -m app.providers.asr.evaluation INPUT.wav --reference REFERENCE.txt --terms TERMS.txt --compare-languages --allow-paid` **显式授权三次真实 ASR 任务**，依次比较自动、韩英、韩语；不要在未授权时运行。单配置仍可用 `--language auto|ko_en|ko`。不传 --allow-paid 时不调用模型。评分规则和边界见 [P4 报告](ASR_P4_VALIDATION.md)。
+
+
 ## 2026-11-26 传输更新
 
 Aliyun在每次录音快照中固定 `aliyun_asr_batch_enabled/ms/max_wait_ms`（默认true/100/100），ready事件同时提供安全audio_runtime。Soniox保留原PCM分帧和协议，仅增加发送/队列诊断。新Adapter须在ws.send成功后准确更新 `metrics['sent_audio_ms']`，该值只表示发送完成，不是云端确认。配置、费用边界与Mock结果见 [音频可靠性](ASR_PIPELINE_RELIABILITY.md)。不会中途切换供应商或自动创建新识别任务。

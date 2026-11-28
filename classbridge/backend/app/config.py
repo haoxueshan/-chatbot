@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     processing_backlog_degraded: int = Field(default=200, ge=2, le=20000)
     processing_backlog_hard_limit: int = Field(default=5000, ge=3, le=50000)
     asr_diagnostics_enabled: bool = True
+    asr_stall_warning_seconds: float = Field(default=20,ge=10,le=300)
     event_loop_lag_sample_ms: int = Field(default=500, ge=100, le=5000)
     asr_recovery_enabled: bool = False
     asr_recovery_buffer_ms: int = Field(default=30000, ge=1000, le=60000)

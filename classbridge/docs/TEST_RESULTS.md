@@ -1,5 +1,41 @@
 # 实际测试与验收记录
 
+
+## P4 续作回归（2026-11-28）
+
+| 检查 | 结果 |
+| --- | --- |
+| INCREMENTAL_TRANSLATION_ENABLED=false | 554 passed, 1 skipped，132.05s |
+| INCREMENTAL_TRANSLATION_ENABLED=true | 554 passed, 1 skipped，132.36s |
+| npm test | 140 passed，0 failed/skip |
+| npm run typecheck | 通过 |
+| npm run build | 通过 |
+| git diff --check | 通过 |
+
+本轮新增 12 个后端用例（时间状态 1、外部数据库变化 4、评测保护 3、实际供应商参数与快照 4）及 1 个前端 flush 超时用例。唯一跳过仍为未提供独立 PostgreSQL + pgvector 环境；没有新增 skip。原始日志在 `test-results/p4-followup-*.log`，上一轮日志保留。前端运行时代码本轮未改动，Chromium 审计结果沿用 11-27，不声称本轮重新执行浏览器审计。
+
+本轮 100 次有效 partial 基准：基线 101 次 SELECT / 100 个 Session，当前 100 次 SELECT / 100 个 Session；P50 0.824 / 0.939ms，P95 1.048 / 1.045ms。减少首次额外 SELECT，同时加强每次 partial 的正式证据检查，未测得显著延迟收益。更多细节见 [P4 报告](ASR_P4_VALIDATION.md)。
+
+
+## P4 最终回归（2026-11-27）
+
+基线 `62d269f1ecab297b2bed53ef6c383b7e895b7729`，临时 SQLite，所有供应商请求为 Mock；没有修改用户数据库或调用真实模型。
+
+| 检查 | 真实结果 |
+| --- | --- |
+| 后端 INCREMENTAL_TRANSLATION_ENABLED=false | 542 passed, 1 skipped，134.64s |
+| 后端 INCREMENTAL_TRANSLATION_ENABLED=true | 542 passed, 1 skipped，134.67s |
+| npm test | 139 passed，0 failed/skip |
+| npm run typecheck | 通过 |
+| npm run build | 通过，Vite 6.4.5 |
+| Chromium responsive.mjs | 通过，320–1920px 的 11 种视口，无横向溢出或浏览器运行错误 |
+| git diff --check | 通过 |
+
+唯一跳过：test_multilingual_migration.py 的 PostgreSQL + pgvector 集成测试，未配置独立服务器。没有新增跳过。后端比历史 490 项增加 52 项参数化用例，前端比 123 增加 16 项。最终两种后端模式以独立进程/临时数据库并行运行，性能对比另用单独的同条件 Mock 基准，不引用全量并行测试时间比较性能。
+
+本机默认 python 是 Store 别名，使用 `../.venv/Scripts/python.exe -m pytest -q -rs`；前端使用 npm。日志位于忽略目录 `test-results/p4-*`。实际设备 Safari、VPN、真实课堂、付费服务和生产 PostgreSQL 均未验证。细节、性能数值、模块与边界见 [P4 实施报告](ASR_P4_VALIDATION.md)。
+
+
 ## 2026-11-27：P3.3 前端国际化
 
 实际 HEAD：`97e016e5da800d6517191b629c7c47cf35fb7af6`，改动保留在工作区，未提交或推送。

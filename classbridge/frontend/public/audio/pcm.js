@@ -3,6 +3,12 @@
 export class PCMFramer {
   constructor() { this.reset(); }
   reset() { this.frame = new ArrayBuffer(640); this.view = new DataView(this.frame); this.used = 0; }
+  flush(emit) {
+    if (!this.used) return;
+    const tail = this.frame.slice(0, this.used * 2);
+    this.reset();
+    emit(tail);
+  }
   push(samples, emit) {
     for (let i = 0; i < samples.length; i++) {
       this.view.setInt16(this.used * 2, samples[i], true);
@@ -22,16 +28,34 @@ export class PCMResampler {
     this.half = 24;
     this.samples = Array(this.half).fill(0);
     this.position = this.half;
+    this.inputSamples = 0;
+    this.outputSamples = 0;
+    this.finished = false;
   }
   push(channels) {
-    if (!channels.length || !channels[0].length) return new Int16Array();
+    if (this.finished || !channels.length || !channels[0].length) return new Int16Array();
+    this.inputSamples += channels[0].length;
     for (let i = 0; i < channels[0].length; i++) {
       let x = 0;
       for (const c of channels) x += c[i] || 0;
       this.samples.push(x / channels.length);
     }
+    return this.drain();
+  }
+  flush() {
+    if (this.finished) return new Int16Array();
+    this.finished = true;
+    // Output sample positions are [0, inputSamples). Boundary zeros supply
+    // filter support only; they never extend the captured audio duration.
+    const remaining = Math.max(0, Math.ceil(this.inputSamples / this.step) - this.outputSamples);
+    this.samples.push(...Array(this.half * 2 + Math.ceil(this.step)).fill(0));
+    const tail = this.drain(remaining);
+    this.samples = [];
+    return tail;
+  }
+  drain(limit = Infinity) {
     const output = [];
-    while (this.position + this.half < this.samples.length) {
+    while (output.length < limit && this.position + this.half < this.samples.length) {
       let sum = 0,
         weight = 0;
       const center = Math.floor(this.position);
@@ -52,6 +76,7 @@ export class PCMResampler {
     const remove = Math.max(0, Math.floor(this.position) - this.half);
     this.samples.splice(0, remove);
     this.position -= remove;
+    this.outputSamples += output.length;
     return Int16Array.from(output);
   }
 }

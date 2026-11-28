@@ -106,7 +106,7 @@ async def bounded_translation(provider, text, settings, **kwargs):
             async with contextlib.aclosing(provider.translate_stream(text,**kwargs)) as stream:
                 async for delta in stream:yield delta
     except TimeoutError as exc:
-        from app.providers.aliyun import ProviderError
+        from app.providers.errors import ProviderError
         raise ProviderError('timeout','翻译请求超时，未完成的译文不会保存为正式结果。',False) from exc
 
 

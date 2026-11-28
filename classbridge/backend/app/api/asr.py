@@ -7,7 +7,7 @@ from app.providers.asr.registry import REGISTRY
 from app.services import asr_profiles as profiles
 from pydantic import BaseModel,ConfigDict
 import asyncio
-from app.providers.aliyun import ProviderError
+from app.providers.errors import ProviderError
 from app.providers.asr.factory import create_asr_provider
 
 router=APIRouter(prefix='/api/asr',tags=['ASR Models'])

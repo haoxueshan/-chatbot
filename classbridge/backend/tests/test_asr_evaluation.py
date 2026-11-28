@@ -96,3 +96,58 @@ def test_evaluation_rejects_unavailable_provider(provider):
 def test_cli_refuses_real_api_without_explicit_authorization():
     result=subprocess.run([sys.executable,'-m','app.providers.asr.evaluation','not-read.wav'],capture_output=True,text=True)
     assert result.returncode==2 and 'No API called' in result.stderr
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('change',[False,True])
+async def test_comparison_uses_same_pcm_and_stops_before_next_task_on_change(tmp_path,change):
+    from app.providers.asr.evaluation import compare_languages
+    path=tmp_path/'compare.wav'
+    def write(value):
+        with wave.open(str(path),'wb') as wav:
+            wav.setparams((1,2,16000,0,'NONE','not compressed'));wav.writeframes(value*801)
+    write(b'\x01\0');calls=[];frames=[]
+    class Provider:
+        async def stream_asr(self,audio,*,on_ready,metrics,language_hints):
+            calls.append(language_hints);await on_ready()
+            frames.append(b''.join([frame async for frame in audio]))
+            if False:yield {}
+    def factory():
+        if change and calls:pytest.fail('Changed input must prevent the next task')
+        return Provider()
+    async def sleep(delay):pass
+    # Modify between evaluations, after the first file handle has closed.
+    import app.providers.asr.evaluation as module
+    original=module.evaluate_wav
+    async def evaluate(*args,**kwargs):
+        result=await original(*args,**kwargs)
+        if change:write(b'\x02\0')
+        return result
+    from unittest.mock import patch
+    with patch.object(module,'evaluate_wav',evaluate):
+        if change:
+            with pytest.raises(RuntimeError,match='changed'):await compare_languages(factory,path,realtime=False)
+            assert calls==[[]]
+        else:
+            reports=await compare_languages(factory,path,realtime=False)
+            assert calls==[[],['ko','en'],['ko']]
+            assert len(set(frames))==1 and len({r['pcm_sha256'] for r in reports.values()})==1
+
+
+@pytest.mark.asyncio
+async def test_evaluation_conflict_does_not_replace_final_or_fake_completion(tmp_path):
+    path=tmp_path/'conflict.wav'
+    with wave.open(str(path),'wb') as wav:
+        wav.setparams((1,2,16000,0,'NONE','not compressed'));wav.writeframes(bytes(640))
+    class Provider:
+        async def stream_asr(self,audio,**kwargs):
+            await kwargs['on_ready']()
+            async for _ in audio:pass
+            for text in ('RAG','RAG','wrong'):
+                yield dict(sentence_id='1',text=text,final=True,start_ms=0,end_ms=20)
+            yield dict(sentence_id='2',text='unconfirmed',final=False,start_ms=20,end_ms=None)
+            yield dict(sentence_id='2',text='',final=True,start_ms=20,end_ms=20)
+    report=await evaluate_wav(Provider(),path,reference='RAG',realtime=False)
+    assert report['accuracy']['english_wer']==0
+    assert report['duplicate_finals']==1 and report['conflicting_finals']==1
+    assert report['final_segments']==1 and report['unconfirmed_sentences']==1

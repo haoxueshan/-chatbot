@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import update
 from app.config import settings
 from app.models import User, Session, ASRProfile
-from app.providers.aliyun import ProviderError
+from app.providers.errors import ProviderError
 from app.providers.asr.registry import get_provider
 from app.providers.asr.factory import create_asr_provider
 from app.services.asr_options import asr_language_hints
@@ -77,6 +77,9 @@ def validate_data(data):
             if len(set(value.language_hints))!=len(value.language_hints) or any(h not in definition.languages for h in value.language_hints):
                 raise ValueError('语言提示不受此 Adapter 支持或存在重复')
         options=definition.options.model_validate(value.provider_options).model_dump(exclude_none=True)
+        advanced=('max_sentence_silence','multi_threshold_mode_enabled','speech_noise_threshold','keep_dialect')
+        if value.provider=='aliyun' and value.model_id!=definition.default_model and any(key in options for key in advanced):
+            raise ValueError('当前模型的可选 VAD 参数兼容性尚未验证')
         if any(not term.strip() or len(term)>128 for term in options.get('terms',[])):
             raise ValueError('术语须为 1–128 字符')
         if value.is_default and (not value.enabled or definition.adapter is None):
@@ -90,6 +93,7 @@ def validate_data(data):
 
 def snapshot(row,user=None):
     data={'profile_id':row.id,**data_of(row)}
+    data['language_hints_source']='user' if data['language_hints'] is None else 'model'
     if data['language_hints'] is None and user is not None:
         data['language_hints']=asr_language_hints((user.settings or {}).get('asr_language_mode','auto')) or []
     data['runtime']={key:getattr(settings,key) for key in ('asr_ws_url','dashscope_workspace_id','dashscope_region',
@@ -108,6 +112,8 @@ def configuration_status(row,user=None):
 
 def public(row,user=None):
     return {'id':row.id,**data_of(row),'created_at':row.created_at.isoformat(),'updated_at':row.updated_at.isoformat(),
+        'model_compatibility':{'protocol':'documented' if row.model_id==get_provider(row.provider).default_model else 'unverified',
+                             'account_access':'unverified','real_call_verified':False},
         'capabilities':get_provider(row.provider).public()['capabilities'],'validation':configuration_status(row,user)}
 
 

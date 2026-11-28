@@ -1,5 +1,6 @@
 """Offline scoring and explicitly invoked WAV replay; no credentials loaded here."""
 import asyncio
+import hashlib
 import re
 import time
 import unicodedata
@@ -55,6 +56,7 @@ async def evaluate_wav(provider: ASRProvider, path, *, reference=None, terms=(),
         samples=wav.getnframes()
         if not 0<samples<=16000*6300:raise ValueError('WAV must contain 0–105 minutes of audio')
         ready_at=None;audio_end=None;first_partial=None;last_final=None;frames=0;sent=0;finals={};metrics={}
+        hypotheses={};revisions=0;duplicates=0;conflicts=0;digest=hashlib.sha256()
         async def ready():
             nonlocal ready_at
             ready_at=clock()
@@ -64,12 +66,22 @@ async def evaluate_wav(provider: ASRProvider, path, *, reference=None, terms=(),
             while data:=wav.readframes(320):
                 if realtime:await sleep(max(0,ready_at+sent/32000-clock()))
                 frames+=1;sent+=len(data)
+                digest.update(data)
                 yield data
             if realtime:await sleep(max(0,ready_at+sent/32000-clock()))
             audio_end=clock()
         async for event in provider.stream_asr(audio(),on_ready=ready,metrics=metrics,language_hints=language_hints):
+            sid=event['sentence_id']
+            if sid in hypotheses and hypotheses[sid]!=event['text']:revisions+=1
+            hypotheses[sid]=event['text']
             if event['final']:
-                # One authoritative snapshot per identity, including legitimate corrections.
+                if not event['text'].strip():continue
+                if sid in finals:
+                    if finals[sid]==event['text']:
+                        duplicates+=1;continue
+                    if not getattr(provider,'supports_final_revisions',False):
+                        conflicts+=1;continue
+                # Only explicit adapter revision support may replace final evidence.
                 finals[event['sentence_id']]=event['text'];last_final=clock()
             elif first_partial is None and event['text']:first_partial=clock()
         if sent!=samples*2 or audio_end is None:raise RuntimeError('Provider did not drain the complete WAV')
@@ -78,13 +90,45 @@ async def evaluate_wav(provider: ASRProvider, path, *, reference=None, terms=(),
                 'last_final_ms':(last_final-ready_at)*1000 if last_final is not None else None,
                 'final_after_audio_ms':(last_final-audio_end)*1000 if last_final is not None else None,
                 'send_wait_ms':metrics.get('send_wait_ms'),'hourly_cost':None,
+                'pcm_sha256':digest.hexdigest(),'source_revisions':revisions,'duplicate_finals':duplicates,
+                'conflicting_finals':conflicts,
+                'unconfirmed_sentences':len(set(hypotheses)-set(finals)),
+                'complete_sentences':len(finals),'missing_pcm_bytes':samples*2-sent,
+                'normalization':'NFC; English casefold/word tokens; Korean nonspace characters; punctuation excluded',
                 'accuracy':score(reference,' '.join(finals.values()),terms)}
+
+
+async def compare_languages(provider_factory, path, **kwargs):
+    """Explicit caller-authorized three-task experiment; never retries failures."""
+    expected=pcm_digest(path)
+    reports={}
+    for name,hints in (('A_auto',[]),('B_ko_en',['ko','en']),('C_ko',['ko'])):
+        # Check before creating the next paid task, not after all three tasks.
+        if pcm_digest(path)!=expected:raise RuntimeError('Comparison input changed between runs')
+        report=await evaluate_wav(provider_factory(),path,language_hints=hints,**kwargs)
+        if report['pcm_sha256']!=expected:raise RuntimeError('Comparison input changed during replay')
+        reports[name]=report
+    return reports
+
+
+def pcm_digest(path):
+    """Bounded preflight without loading a classroom recording into memory."""
+    digest=hashlib.sha256()
+    with wave.open(str(path),'rb') as wav:
+        if (wav.getnchannels(),wav.getsampwidth(),wav.getframerate(),wav.getcomptype())!=(1,2,16000,'NONE'):
+            raise ValueError('WAV must be uncompressed mono PCM16LE at 16000 Hz')
+        if not 0<wav.getnframes()<=16000*6300:raise ValueError('WAV must contain 0–105 minutes of audio')
+        count=0
+        while data:=wav.readframes(32000):
+            count+=len(data);digest.update(data)
+        if count!=wav.getnframes()*2:raise ValueError('Truncated PCM input')
+    return digest.hexdigest()
 
 
 def evaluation_config(provider, model=None):
     """Resolve replay-only settings without mutating shared session configuration."""
     from app.config import Settings
-    from app.providers.aliyun import ProviderError
+    from app.providers.errors import ProviderError
     from .registry import get_provider
     definition=get_provider(provider)
     if definition.adapter is None:
@@ -107,19 +151,21 @@ def main():
     parser.add_argument('--terms',help='UTF-8 newline-separated technical terms')
     parser.add_argument('--language',choices=('auto','ko_en','ko'),default='auto')
     parser.add_argument('--allow-paid',action='store_true',help='Explicitly authorize one real ASR task')
+    parser.add_argument('--compare-languages',action='store_true',help='With --allow-paid, authorize THREE sequential A/B/C tasks')
     args=parser.parse_args()
     if not args.allow_paid:parser.error('No API called. Real replay requires explicit --allow-paid authorization.')
     # Import settings only after explicit authorization, never for offline scoring.
     from .factory import create_asr_provider
-    from app.providers.aliyun import ProviderError
+    from app.providers.errors import ProviderError
     from app.services.asr_options import asr_language_hints
     try:
         provider=create_asr_provider(evaluation_config(args.provider,args.model))
         provider.ensure_configured()
-        report=asyncio.run(evaluate_wav(provider,args.wav,
+        runner=(lambda *a,**kw:compare_languages(lambda:create_asr_provider(evaluation_config(args.provider,args.model)),*a,**kw)) if args.compare_languages else (lambda *a,**kw:evaluate_wav(provider,*a,**kw))
+        report=asyncio.run(runner(args.wav,
             reference=Path(args.reference).read_text(encoding='utf-8') if args.reference else None,
             terms=Path(args.terms).read_text(encoding='utf-8').splitlines() if args.terms else (),
-            language_hints=asr_language_hints(args.language)))
+            **({} if args.compare_languages else {'language_hints':asr_language_hints(args.language)})))
     except ProviderError as exc:parser.exit(1,f'ASR failed: {exc.code}\n')
     except (ValueError,OSError,wave.Error,RuntimeError):parser.exit(1,'Evaluation failed: invalid WAV/reference or incomplete audio drain\n')
     print(json.dumps(report,ensure_ascii=False,indent=2))

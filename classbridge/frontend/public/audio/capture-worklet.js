@@ -4,13 +4,27 @@ class ClassBridgeCapture extends AudioWorkletProcessor {
   constructor(options) {
     super();
     this.enabled = !options?.processorOptions?.deferred;
+    this.finished = false;
+    this.emittedSamples = 0;
     this.resampler = new PCMResampler(sampleRate);
     this.framer = new PCMFramer();
-    this.emitFrame = (frame) => this.port.postMessage({ type: "frame", frame }, [frame]);
+    this.emitFrame = (frame) => {
+      this.emittedSamples += frame.byteLength / 2;
+      this.port.postMessage({ type: "frame", frame }, [frame]);
+    };
     this.meterTicks = 0;
     this.quality = new InputQuality(sampleRate);
     this.port.onmessage = ({ data }) => {
-      if (data.type === "begin" && !this.enabled) {
+      if (data.type === "flush") {
+        if (!this.finished) {
+          this.finished = true;
+          this.enabled = false;
+          this.framer.push(this.resampler.flush(), this.emitFrame);
+          this.framer.flush(this.emitFrame);
+        }
+        this.port.postMessage({ type: "flush-complete", request_id: data.request_id, emitted_samples: this.emittedSamples });
+      }
+      if (data.type === "begin" && !this.enabled && !this.finished) {
         this.resampler = new PCMResampler(sampleRate);
         this.framer.reset();
         this.enabled = true;

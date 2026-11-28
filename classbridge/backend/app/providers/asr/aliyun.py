@@ -5,6 +5,7 @@ from app.providers.aliyun import AliyunProvider, ProviderError
 
 
 class AliyunASRAdapter(AliyunProvider):
+    supports_final_revisions = False
     """ASR-only boundary; keep the proven transport unchanged."""
     def ensure_configured(self):
         super().ensure_configured(protocols=('ws',))
@@ -19,8 +20,14 @@ class AliyunASRAdapter(AliyunProvider):
     async def stream_asr(self,audio,**kwargs):
         self.ensure_configured()
         options=self.value('asr_options',{})
-        if 'context' in options:kwargs['context']=options['context']
-        if 'vad_model' in options:kwargs['vad_model']=options['vad_model']
-        if self.value('asr_language_hints',None) is not None:kwargs['language_hints']=self.value('asr_language_hints',None)
+        if not self.value('asr_effective_resolved',False):
+            # Legacy entry point uses the same precedence as live capture.
+            from app.services.asr_config_resolver import resolve_effective_asr_config
+            effective=resolve_effective_asr_config(self.config, preferences={
+                'asr_context':kwargs.get('context') or '',
+                'asr_acoustic_profile':'near' if kwargs.get('vad_model')=='near_meeting_16k' else 'far'})
+            if options.get('context') is not None:kwargs['context']=effective.context
+            if options.get('vad_model') is not None:kwargs['vad_model']=effective.vad_model
+            if self.value('asr_language_hints',None) is not None:kwargs['language_hints']=list(effective.language_hints)
         async with aclosing(super().stream_asr(audio,**kwargs)) as stream:
             async for event in stream:yield event
